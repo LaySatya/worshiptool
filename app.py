@@ -77,57 +77,102 @@ FONT_FILE_MAP = {
     "Khmer OS Moul Light": "KhmerOSMoulLight.ttf",
 }
 
-def embed_fonts_in_prs(prs: Presentation, font_name: str):
+
+def save_prs_with_fonts(prs: Presentation, name: str, font_name: str) -> str:
     """
-    Embeds the TTF font file for font_name into the PPTX so that
-    PowerPoint on any computer renders text correctly without requiring
-    a local font installation.
+    Save presentation then inject the Khmer TTF font directly into the
+    PPTX zip (OOXML embeddedFont), so the font renders on any computer
+    without requiring a local font installation.
     """
+    import zipfile
     from lxml import etree
-    from pptx.oxml.ns import qn
+
+    path = os.path.join(OUTPUT_FOLDER, name)
+    prs.save(path)
 
     ttf_filename = FONT_FILE_MAP.get(font_name)
     if not ttf_filename:
-        return  # not a Khmer font we manage — skip
+        return path  # not a managed Khmer font — return as-is
 
     ttf_path = os.path.join(FONT_DIR, ttf_filename)
     if not os.path.exists(ttf_path):
-        return  # font file not found on server — skip silently
+        return path  # font file missing on server — skip silently
 
     with open(ttf_path, "rb") as f:
         font_data = f.read()
 
-    # Add the font as a relationship + part in the presentation
-    # OOXML: /ppt/fonts/<name>.fntdata  with r:id reference in embeddedFont
-    from pptx.opc.part import Part
-    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+    tmp_path  = path + ".tmp.pptx"
+    rels_path = "ppt/_rels/presentation.xml.rels"
+    prs_path  = "ppt/presentation.xml"
+    ct_path   = "[Content_Types].xml"
+    font_zip_path = f"ppt/fonts/{ttf_filename}"
 
-    font_part_name = f"/ppt/fonts/{ttf_filename}"
-    font_content_type = "application/x-fontdata"
+    p_ns  = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    r_ns  = "http://schemas.openxmlformats.org/package/2006/relationships"
+    r2_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    font_rel_type = f"{r2_ns}/font"
 
-    # Check if already embedded
-    for rel in prs.part.rels.values():
-        if rel.reltype.endswith("font") and ttf_filename in rel.target_partname:
-            return
+    with zipfile.ZipFile(path, "r") as zin, \
+         zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
 
-    font_part = Part(font_part_name, font_content_type, font_data)
-    rId = prs.part.relate_to(font_part, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font")
+        # ── Read and patch rels ────────────────────────────────
+        rels_root = etree.fromstring(zin.read(rels_path))
+        existing_ids = {el.get("Id") for el in rels_root}
+        rId = "rFnt1"
+        counter = 1
+        while rId in existing_ids:
+            counter += 1
+            rId = f"rFnt{counter}"
+        new_rel = etree.SubElement(rels_root, f"{{{r_ns}}}Relationship")
+        new_rel.set("Id",     rId)
+        new_rel.set("Type",   font_rel_type)
+        new_rel.set("Target", f"fonts/{ttf_filename}")
+        patched_rels = etree.tostring(rels_root, xml_declaration=True,
+                                      encoding="UTF-8", standalone=True)
 
-    # Add <p:embeddedFont> element to presentation.xml
-    pPr = prs.presentation_part.presentation
-    # find or create <p:embeddedFontLst>
-    ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
-    lst = pPr.find(f"{{{ns}}}embeddedFontLst")
-    if lst is None:
-        lst = etree.SubElement(pPr, f"{{{ns}}}embeddedFontLst")
+        # ── Read and patch presentation.xml ───────────────────
+        prs_root = etree.fromstring(zin.read(prs_path))
+        lst = prs_root.find(f"{{{p_ns}}}embeddedFontLst")
+        if lst is None:
+            lst = etree.SubElement(prs_root, f"{{{p_ns}}}embeddedFontLst")
+        ef  = etree.SubElement(lst, f"{{{p_ns}}}embeddedFont")
+        fnt = etree.SubElement(ef,  f"{{{p_ns}}}font")
+        fnt.set("typeface", font_name)
+        reg = etree.SubElement(ef,  f"{{{p_ns}}}regular")
+        reg.set(f"{{{r2_ns}}}id", rId)
+        patched_prs = etree.tostring(prs_root, xml_declaration=True,
+                                     encoding="UTF-8", standalone=True)
 
-    ef = etree.SubElement(lst, f"{{{ns}}}embeddedFont")
-    fnt = etree.SubElement(ef, f"{{{ns}}}font")
-    fnt.set("typeface", font_name)
+        # ── Read and patch [Content_Types].xml ────────────────
+        ct_root   = etree.fromstring(zin.read(ct_path))
+        part_name = f"/ppt/fonts/{ttf_filename}"
+        font_ct   = "application/vnd.openxmlformats-officedocument.presentationml.font"
+        already   = any(el.get("PartName") == part_name
+                        for el in ct_root.findall(f"{{{ct_ns}}}Override"))
+        if not already:
+            ov = etree.SubElement(ct_root, f"{{{ct_ns}}}Override")
+            ov.set("PartName",    part_name)
+            ov.set("ContentType", font_ct)
+        patched_ct = etree.tostring(ct_root, xml_declaration=True,
+                                    encoding="UTF-8", standalone=True)
 
-    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-    reg = etree.SubElement(ef, f"{{{ns}}}regular")
-    reg.set(f"{{{r_ns}}}id", rId)
+        # ── Write everything out, skipping the 3 files we patched
+        patched = {rels_path, prs_path, ct_path}
+        for item in zin.infolist():
+            if item.filename not in patched:
+                zout.writestr(item, zin.read(item.filename))
+
+        # Write patched versions
+        zout.writestr(rels_path,    patched_rels)
+        zout.writestr(prs_path,     patched_prs)
+        zout.writestr(ct_path,      patched_ct)
+        # Write font binary
+        zout.writestr(font_zip_path, font_data)
+
+    os.replace(tmp_path, path)
+    return path
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -318,8 +363,7 @@ def build_bible_pptx(verses: list,
                       font_name, ref_size, False, (rr, rg, rb),
                       PP_ALIGN.RIGHT)
 
-    embed_fonts_in_prs(prs, font_name)
-    return save_prs(prs, f"bible_{uuid.uuid4()}.pptx")
+    return save_prs_with_fonts(prs, f"bible_{uuid.uuid4()}.pptx", font_name)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -619,8 +663,7 @@ def build_lyric_pptx(lyrics_text: str,
             run.font.bold  = bold
             run.font.color.rgb = RGBColor(r, g, b)
 
-    embed_fonts_in_prs(prs, font_name)
-    return save_prs(prs, f"lyrics_{uuid.uuid4()}.pptx")
+    return save_prs_with_fonts(prs, f"lyrics_{uuid.uuid4()}.pptx", font_name)
 
 
 # ══════════════════════════════════════════════════════════════════
