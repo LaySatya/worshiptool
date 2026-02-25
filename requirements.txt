@@ -1,6 +1,8 @@
 flask
+gunicorn
 pdf2image
 pillow
 python-pptx
 numpy
 pytesseract
+lxml
