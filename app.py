@@ -6,7 +6,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-import os, uuid, io, textwrap
+import os, uuid, io, textwrap, base64
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -66,6 +66,68 @@ def save_prs(prs: Presentation, name: str) -> str:
     path = os.path.join(OUTPUT_FOLDER, name)
     prs.save(path)
     return path
+
+
+# Font file map: font name (as shown in dropdown) → TTF filename in fonts/
+FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+FONT_FILE_MAP = {
+    "Khmer OS Battambang": "KhmerOSBattambang-Regular.ttf",
+    "Khmer OS":            "KhmerOS_.ttf",
+    "Khmer OS Muol":       "KhmerOS_muol.ttf",
+    "Khmer OS Moul Light": "KhmerOSMoulLight.ttf",
+}
+
+def embed_fonts_in_prs(prs: Presentation, font_name: str):
+    """
+    Embeds the TTF font file for font_name into the PPTX so that
+    PowerPoint on any computer renders text correctly without requiring
+    a local font installation.
+    """
+    from lxml import etree
+    from pptx.oxml.ns import qn
+
+    ttf_filename = FONT_FILE_MAP.get(font_name)
+    if not ttf_filename:
+        return  # not a Khmer font we manage — skip
+
+    ttf_path = os.path.join(FONT_DIR, ttf_filename)
+    if not os.path.exists(ttf_path):
+        return  # font file not found on server — skip silently
+
+    with open(ttf_path, "rb") as f:
+        font_data = f.read()
+
+    # Add the font as a relationship + part in the presentation
+    # OOXML: /ppt/fonts/<name>.fntdata  with r:id reference in embeddedFont
+    from pptx.opc.part import Part
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    font_part_name = f"/ppt/fonts/{ttf_filename}"
+    font_content_type = "application/x-fontdata"
+
+    # Check if already embedded
+    for rel in prs.part.rels.values():
+        if rel.reltype.endswith("font") and ttf_filename in rel.target_partname:
+            return
+
+    font_part = Part(font_part_name, font_content_type, font_data)
+    rId = prs.part.relate_to(font_part, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font")
+
+    # Add <p:embeddedFont> element to presentation.xml
+    pPr = prs.presentation_part.presentation
+    # find or create <p:embeddedFontLst>
+    ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    lst = pPr.find(f"{{{ns}}}embeddedFontLst")
+    if lst is None:
+        lst = etree.SubElement(pPr, f"{{{ns}}}embeddedFontLst")
+
+    ef = etree.SubElement(lst, f"{{{ns}}}embeddedFont")
+    fnt = etree.SubElement(ef, f"{{{ns}}}font")
+    fnt.set("typeface", font_name)
+
+    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    reg = etree.SubElement(ef, f"{{{ns}}}regular")
+    reg.set(f"{{{r_ns}}}id", rId)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -256,6 +318,7 @@ def build_bible_pptx(verses: list,
                       font_name, ref_size, False, (rr, rg, rb),
                       PP_ALIGN.RIGHT)
 
+    embed_fonts_in_prs(prs, font_name)
     return save_prs(prs, f"bible_{uuid.uuid4()}.pptx")
 
 
@@ -556,6 +619,7 @@ def build_lyric_pptx(lyrics_text: str,
             run.font.bold  = bold
             run.font.color.rgb = RGBColor(r, g, b)
 
+    embed_fonts_in_prs(prs, font_name)
     return save_prs(prs, f"lyrics_{uuid.uuid4()}.pptx")
 
 
