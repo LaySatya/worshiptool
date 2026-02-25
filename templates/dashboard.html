@@ -1,258 +1,278 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Slide Studio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Serif+Khmer:wght@400;600&display=swap" rel="stylesheet"/>
-  <style>
-/* ── Reset ─────────────────────────────────────────────────── */
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Slide Studio — Khmer Worship</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Serif+Khmer:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --sidebar-w:232px;--sidebar-mini:60px;
-  --bg:#f5f6fa;--surface:#ffffff;--surface2:#f0f2f8;
-  --border:#e2e5ee;--border2:#d0d4e8;
-  --accent:#4f46e5;--accent-lt:#eef2ff;--accent-hv:#4338ca;
-  --text:#111827;--text-md:#374151;--muted:#6b7280;--muted2:#9ca3af;
-  --green:#16a34a;--green-lt:#dcfce7;
-  --red:#dc2626;--red-lt:#fee2e2;
-  --radius:10px;--radius-sm:6px;
-  --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
-  --shadow:0 4px 16px rgba(0,0,0,.08);
+  --sidebar-w:240px;--sidebar-mini:64px;
+  --bg:#f4f5f9;--surface:#ffffff;--surface2:#f0f1f7;--surface3:#e8eaf2;
+  --border:#e3e6ef;--border2:#d1d5e8;
+  --accent:#5b50e8;--accent2:#7c74ef;--accent-lt:#eeedfd;--accent-hv:#4a40d4;
+  --text:#0f1729;--text-md:#374151;--muted:#6b7280;--muted2:#9ca3af;
+  --green:#16a34a;--green-lt:#dcfce7;--green-bd:#bbf7d0;
+  --red:#dc2626;--red-lt:#fee2e2;--red-bd:#fecaca;
+  --radius:12px;--radius-sm:8px;--radius-xs:5px;
+  --shadow-xs:0 1px 2px rgba(0,0,0,.06);
+  --shadow-sm:0 1px 4px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+  --shadow:0 4px 20px rgba(0,0,0,.08);
 }
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;font-size:14px}
-/* SIDEBAR */
-.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;transition:width .22s cubic-bezier(.4,0,.2,1);z-index:200;overflow:hidden}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;font-size:14px;line-height:1.5}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;transition:width .22s cubic-bezier(.4,0,.2,1);z-index:300;overflow:hidden}
 .sidebar.mini{width:var(--sidebar-mini)}
-.sidebar-logo{display:flex;align-items:center;gap:10px;padding:18px 14px 14px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;flex-shrink:0}
-.logo-mark{width:34px;height:34px;border-radius:9px;flex-shrink:0;background:linear-gradient(135deg,#4f46e5,#818cf8);display:flex;align-items:center;justify-content:center;font-size:1.1rem;color:#fff;box-shadow:0 2px 8px rgba(79,70,229,.35)}
-.logo-name{font-size:.95rem;font-weight:700;color:var(--text);transition:opacity .2s}
-.sidebar.mini .logo-name{opacity:0;width:0}
-.sidebar-toggle{margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted2);padding:4px;border-radius:4px;font-size:1rem;line-height:1;flex-shrink:0;transition:color .15s,background .15s}
+.sidebar-logo{display:flex;align-items:center;gap:10px;padding:20px 14px 16px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;flex-shrink:0}
+.logo-mark{width:36px;height:36px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1.1rem;color:#fff;box-shadow:0 3px 10px rgba(91,80,232,.35)}
+.logo-text{overflow:hidden;transition:opacity .2s,width .2s}
+.logo-name{font-size:.93rem;font-weight:700;color:var(--text);display:block;line-height:1.2}
+.logo-tagline{font-size:.68rem;color:var(--muted2);font-weight:400}
+.sidebar.mini .logo-text{opacity:0;width:0}
+.sidebar-toggle{margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted2);padding:5px;border-radius:var(--radius-xs);font-size:.9rem;line-height:1;flex-shrink:0;transition:all .15s}
 .sidebar-toggle:hover{color:var(--text);background:var(--surface2)}
-.sidebar-nav{flex:1;padding:10px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto;overflow-x:hidden}
-.nav-section{font-size:.67rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted2);padding:10px 8px 4px;white-space:nowrap;transition:opacity .2s}
+.sidebar-nav{flex:1;padding:12px 8px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;overflow-x:hidden}
+.nav-section{font-size:.65rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);padding:10px 10px 4px;white-space:nowrap;transition:opacity .2s}
 .sidebar.mini .nav-section{opacity:0}
-.nav-btn{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--radius-sm);cursor:pointer;border:none;background:none;width:100%;color:var(--muted);font-size:.875rem;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;transition:background .15s,color .15s}
+.nav-btn{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--radius-sm);cursor:pointer;border:none;background:none;width:100%;color:var(--muted);font-size:.85rem;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;transition:background .15s,color .15s;position:relative}
 .nav-btn:hover{background:var(--surface2);color:var(--text-md)}
 .nav-btn.active{background:var(--accent-lt);color:var(--accent);font-weight:600}
-.nav-icon{width:20px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.95rem}
-.nav-label{overflow:hidden;transition:opacity .2s,width .2s}
+.nav-btn.active::before{content:'';position:absolute;left:0;top:20%;bottom:20%;width:3px;border-radius:0 2px 2px 0;background:var(--accent)}
+.nav-icon{width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1rem}
+.nav-label{overflow:hidden;transition:opacity .2s,width .2s;flex:1}
 .sidebar.mini .nav-label{opacity:0;width:0}
-.sidebar-footer{padding:10px 8px;border-top:1px solid var(--border)}
-/* MAIN */
+.sidebar-footer{padding:10px 8px 14px;border-top:1px solid var(--border)}
+.version-pill{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--radius-sm);background:var(--surface2);white-space:nowrap;overflow:hidden}
+.version-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 0 2px var(--green-lt)}
+.version-txt{font-size:.72rem;color:var(--muted);transition:opacity .2s}
+.sidebar.mini .version-txt{opacity:0;width:0}
 .main{margin-left:var(--sidebar-w);flex:1;min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s cubic-bezier(.4,0,.2,1)}
 body.mini .main{margin-left:var(--sidebar-mini)}
-.topbar{height:56px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 24px;position:sticky;top:0;z-index:100;box-shadow:var(--shadow-sm)}
-.topbar-ham{display:none;background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--muted);padding:4px;border-radius:4px}
+.topbar{height:58px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 24px;position:sticky;top:0;z-index:100;box-shadow:var(--shadow-xs)}
+.topbar-ham{display:none;background:none;border:none;font-size:1.15rem;cursor:pointer;color:var(--muted);padding:5px;border-radius:var(--radius-xs)}
 .topbar-ham:hover{color:var(--text)}
-.topbar-title{font-size:.95rem;font-weight:700;color:var(--text)}
-.topbar-badge{font-size:.68rem;font-weight:600;padding:2px 9px;border-radius:99px;background:var(--accent-lt);color:var(--accent);letter-spacing:.04em}
+.page-icon{font-size:1.25rem;line-height:1}
+.topbar-title{font-size:.92rem;font-weight:700;color:var(--text);line-height:1.2}
+.topbar-sub{font-size:.72rem;color:var(--muted2)}
 .topbar-spacer{flex:1}
-.page{flex:1;padding:24px}
+.topbar-actions{display:flex;align-items:center;gap:8px}
+.kbd-hint{font-size:.7rem;color:var(--muted2);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--radius-xs);background:var(--surface2);display:none}
+@media(min-width:900px){.kbd-hint{display:inline}}
+.theme-btn{width:34px;height:34px;border-radius:var(--radius-xs);background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.95rem;color:var(--muted);transition:all .15s}
+.theme-btn:hover{background:var(--surface3);color:var(--text)}
+.page{flex:1;padding:28px 28px 48px}
 .panel{display:none}
-.panel.active{display:block}
-/* LAYOUT */
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
-@media(max-width:900px){.two-col{grid-template-columns:1fr}}
+.panel.active{display:block;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.page-header{margin-bottom:24px}
+.page-title{font-size:1.4rem;font-weight:700;color:var(--text);margin-bottom:3px;display:flex;align-items:center;gap:9px}
+.page-desc{font-size:.83rem;color:var(--muted);line-height:1.6}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+.col-left{display:flex;flex-direction:column;gap:0}
+.col-right{position:sticky;top:78px;display:flex;flex-direction:column;gap:16px}
+@media(max-width:960px){.two-col{grid-template-columns:1fr}.col-right{position:static}}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
 @media(max-width:600px){.g2,.g3{grid-template-columns:1fr}}
-.mb12{margin-bottom:12px}.mb16{margin-bottom:16px}.mb20{margin-bottom:20px}
-/* CARDS */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;box-shadow:var(--shadow-sm)}
-.card-head{display:flex;align-items:center;gap:8px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
-.sec-head{margin-bottom:20px}
-.sec-title{font-size:1.25rem;font-weight:700;color:var(--text);margin-bottom:4px}
-.sec-sub{font-size:.83rem;color:var(--muted)}
-/* FORM */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px;box-shadow:var(--shadow-sm)}
+.card:last-child{margin-bottom:0}
+.card-head{display:flex;align-items:center;gap:8px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.card-head-icon{width:24px;height:24px;border-radius:6px;background:var(--accent-lt);display:flex;align-items:center;justify-content:center;font-size:.85rem;flex-shrink:0}
 .field{display:flex;flex-direction:column;gap:5px}
-label{font-size:.74rem;font-weight:500;color:var(--muted);letter-spacing:.03em}
-input[type=text],input[type=number],select,textarea{background:var(--surface);border:1.5px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-family:'Inter',sans-serif;font-size:.875rem;padding:8px 11px;width:100%;outline:none;transition:border-color .15s,box-shadow .15s}
-input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
-textarea{resize:vertical;min-height:110px;line-height:1.65}
-select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='6'%3E%3Cpath d='M0 0l5.5 6L11 0z' fill='%236b7280'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:30px}
-input[type=color]{width:38px;height:36px;padding:2px 3px;border-radius:var(--radius-sm);border:1.5px solid var(--border2);background:var(--surface);cursor:pointer}
+.mb14{margin-bottom:14px}.mb18{margin-bottom:18px}
+label{font-size:.73rem;font-weight:600;color:var(--muted);letter-spacing:.02em;user-select:none}
+input[type=text],input[type=number],select,textarea{background:var(--surface);border:1.5px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-family:'Inter',sans-serif;font-size:.875rem;padding:8px 12px;width:100%;outline:none;transition:border-color .15s,box-shadow .15s,background .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,80,232,.12);background:#fefefe}
+textarea{resize:vertical;min-height:120px;line-height:1.7}
+select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6L10 0z' fill='%236b7280'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
+input[type=color]{width:38px;height:36px;padding:2px 3px;border-radius:var(--radius-sm);border:1.5px solid var(--border2);background:var(--surface);cursor:pointer;flex-shrink:0}
 .color-row{display:flex;align-items:center;gap:7px}
-.color-row input[type=text]{flex:1;font-size:.8rem}
-input[type=range]{accent-color:var(--accent);width:100%}
-.range-row{display:flex;align-items:center;gap:8px}
-.range-val{font-size:.82rem;font-weight:600;color:var(--text);min-width:34px}
-.toggle-row{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none}
-.toggle{position:relative;width:36px;height:20px;flex-shrink:0}
+.color-row input[type=text]{flex:1;font-size:.8rem;font-family:monospace}
+input[type=range]{accent-color:var(--accent);width:100%;cursor:pointer}
+.range-row{display:flex;align-items:center;gap:10px}
+.range-val{font-size:.82rem;font-weight:700;color:var(--accent);min-width:38px;text-align:right;background:var(--accent-lt);padding:2px 7px;border-radius:var(--radius-xs)}
+.toggle-row{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;padding:4px 0}
+.toggle{position:relative;width:38px;height:22px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0}
 .tog-track{position:absolute;inset:0;background:var(--border2);border-radius:99px;transition:.2s}
-.tog-track::before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tog-track::before{content:'';position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 4px rgba(0,0,0,.2)}
 .toggle input:checked+.tog-track{background:var(--accent)}
 .toggle input:checked+.tog-track::before{transform:translateX(16px)}
-.tog-label{font-size:.8rem;color:var(--muted)}
-/* BUTTONS */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;border-radius:8px;font-family:'Inter',sans-serif;font-size:.875rem;font-weight:600;cursor:pointer;padding:9px 18px;transition:all .15s;white-space:nowrap}
-.btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover:not(:disabled){background:var(--accent-hv);transform:translateY(-1px);box-shadow:0 4px 12px rgba(79,70,229,.3)}
-.btn-ghost{background:var(--surface2);color:var(--text-md);border:1.5px solid var(--border2)}
-.btn-ghost:hover:not(:disabled){background:var(--border)}
+.tog-label{font-size:.82rem;color:var(--text-md);font-weight:500}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:var(--radius-sm);font-family:'Inter',sans-serif;font-size:.875rem;font-weight:600;cursor:pointer;padding:10px 20px;transition:all .15s;white-space:nowrap}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 2px 10px rgba(91,80,232,.25)}
+.btn-primary:hover:not(:disabled){background:linear-gradient(135deg,var(--accent-hv),var(--accent));transform:translateY(-1px);box-shadow:0 5px 16px rgba(91,80,232,.35)}
+.btn-primary:active:not(:disabled){transform:translateY(0)}
+.btn-secondary{background:var(--surface);color:var(--text-md);border:1.5px solid var(--border2);box-shadow:var(--shadow-xs)}
+.btn-secondary:hover:not(:disabled){background:var(--surface2)}
 .btn-full{width:100%}
-/* DROP ZONE */
-.drop-zone{border:2px dashed var(--border2);border-radius:var(--radius);padding:32px 16px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:var(--surface2)}
+.btn-generate{padding:12px 20px;font-size:.93rem;border-radius:var(--radius);margin-top:4px}
+.drop-zone{border:2px dashed var(--border2);border-radius:var(--radius);padding:36px 20px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:var(--surface2)}
 .drop-zone:hover,.drop-zone.over{border-color:var(--accent);background:var(--accent-lt)}
 .drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-.drop-icon{font-size:2rem;margin-bottom:8px;color:var(--muted2)}
-.drop-title{font-size:.9rem;font-weight:600;color:var(--text-md)}
-.drop-sub{font-size:.76rem;color:var(--muted2);margin-top:3px}
-.file-pill{display:none;align-items:center;gap:8px;background:var(--green-lt);border:1px solid #bbf7d0;border-radius:var(--radius-sm);padding:7px 12px;margin-top:10px;font-size:.82rem;color:var(--green);font-weight:500}
+.drop-icon{font-size:2.2rem;margin-bottom:10px;line-height:1}
+.drop-title{font-size:.9rem;font-weight:600;color:var(--text-md);margin-bottom:3px}
+.drop-sub{font-size:.75rem;color:var(--muted2);line-height:1.7}
+.file-pill{display:none;align-items:center;gap:9px;background:var(--green-lt);border:1px solid var(--green-bd);border-radius:var(--radius-sm);padding:8px 14px;margin-top:10px;font-size:.82rem;color:var(--green);font-weight:600}
 .file-pill.on{display:flex}
-/* STATUS */
-.status{display:none;align-items:center;gap:9px;padding:10px 14px;border-radius:8px;font-size:.84rem;margin-top:12px;font-weight:500}
+.status{display:none;align-items:center;gap:10px;padding:11px 15px;border-radius:var(--radius-sm);font-size:.84rem;margin-top:12px;font-weight:500;line-height:1.4}
 .status.on{display:flex}
-.status.loading{background:#eef2ff;color:var(--accent);border:1px solid #c7d2fe}
-.status.ok{background:var(--green-lt);color:var(--green);border:1px solid #bbf7d0}
-.status.err{background:var(--red-lt);color:var(--red);border:1px solid #fecaca}
-.spin{width:15px;height:15px;border:2px solid rgba(79,70,229,.2);border-top-color:var(--accent);border-radius:50%;animation:rot .7s linear infinite;flex-shrink:0}
+.status.loading{background:#eeedfd;color:var(--accent);border:1px solid #c7c2f8}
+.status.ok{background:var(--green-lt);color:var(--green);border:1px solid var(--green-bd)}
+.status.err{background:var(--red-lt);color:var(--red);border:1px solid var(--red-bd)}
+.spin{width:15px;height:15px;border:2.5px solid rgba(91,80,232,.2);border-top-color:var(--accent);border-radius:50%;animation:rot .7s linear infinite;flex-shrink:0}
 @keyframes rot{to{transform:rotate(360deg)}}
-/* CAROUSEL */
+.preview-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.preview-card-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.preview-card-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2)}
+.preview-card-count{font-size:.78rem;font-weight:600;color:var(--accent);background:var(--accent-lt);padding:2px 9px;border-radius:99px}
+.preview-body{padding:16px}
 .preview-wrap{position:relative}
-.preview-slide{aspect-ratio:16/9;border-radius:var(--radius);border:1.5px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 32px;overflow:hidden;position:relative;transition:background .25s;box-shadow:var(--shadow)}
-.prev-body{line-height:1.55;max-width:100%;word-break:break-word;white-space:pre-line;transition:color .2s,font-size .2s}
-.prev-ref{position:absolute;bottom:10px;right:14px;font-size:.75em;opacity:.75}
+.preview-slide{aspect-ratio:16/9;border-radius:var(--radius-sm);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 32px;overflow:hidden;position:relative;transition:background .25s;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.prev-body{line-height:1.55;max-width:100%;word-break:break-word;white-space:pre-line;transition:color .2s,font-size .2s;text-align:center}
+.prev-ref{position:absolute;bottom:10px;right:14px;font-size:.75em;opacity:.7}
 .prev-nav{position:absolute;top:50%;transform:translateY(-50%);display:flex;align-items:center}
 .prev-nav.left{left:-14px}
 .prev-nav.right{right:-14px}
-.prev-arrow{width:30px;height:30px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border);box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.85rem;color:var(--text-md);transition:all .15s;line-height:1}
+.prev-arrow{width:32px;height:32px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border);box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.85rem;color:var(--text-md);transition:all .15s;line-height:1}
 .prev-arrow:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
-.prev-arrow:disabled{opacity:.3;cursor:default}
-.prev-footer{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px}
-.prev-count{font-size:.75rem;color:var(--muted);font-weight:500}
-.prev-dots{display:flex;gap:5px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--border2);transition:all .2s}
-.dot.on{background:var(--accent);width:16px;border-radius:3px}
-.prev-hint{font-size:.73rem;color:var(--muted2);text-align:center;margin-top:6px}
-/* MISC */
-.divider{height:1px;background:var(--border);margin:16px 0}
-.tip-card{background:var(--accent-lt);border:1px solid #c7d2fe;border-radius:var(--radius);padding:14px 16px;margin-bottom:16px}
-.tip-title{font-size:.78rem;font-weight:700;color:var(--accent);margin-bottom:6px}
-.tip-body{font-size:.82rem;color:var(--muted);line-height:1.55}
-.steps{display:flex;flex-direction:column;gap:14px}
+.prev-arrow:disabled{opacity:.25;cursor:default}
+.prev-footer{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 14px}
+.prev-dots{display:flex;gap:5px;align-items:center}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--border2);transition:all .2s;cursor:pointer}
+.dot:hover{background:var(--accent2)}
+.dot.on{background:var(--accent);width:18px;border-radius:3px}
+.prev-hint{font-size:.7rem;color:var(--muted2);display:flex;align-items:center;gap:4px}
+kbd{display:inline-block;padding:1px 5px;font-size:.68rem;border-radius:4px;border:1px solid var(--border2);background:var(--surface);color:var(--muted);font-family:monospace;line-height:1.5}
+.divider{height:1px;background:var(--border);margin:18px 0}
+.info-box{background:var(--accent-lt);border:1px solid #c7c2f8;border-radius:var(--radius);padding:14px 16px;margin-bottom:0}
+.info-box-title{font-size:.75rem;font-weight:700;color:var(--accent);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.info-box-body{font-size:.8rem;color:var(--muted);line-height:1.6}
+.steps{display:flex;flex-direction:column;gap:12px}
 .step{display:flex;align-items:flex-start;gap:12px}
-.step-num{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:.68rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.step p{font-size:.84rem;color:var(--muted);line-height:1.5}
-/* MOBILE */
-.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:190}
+.step-num{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:.68rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 6px rgba(91,80,232,.3)}
+.step-content p{font-size:.82rem;color:var(--muted);line-height:1.5}
+.step-content strong{color:var(--text-md)}
+.color-presets{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+.color-preset{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s;box-shadow:var(--shadow-xs)}
+.color-preset:hover{transform:scale(1.15)}
+.section-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:290;backdrop-filter:blur(2px)}
 @media(max-width:768px){
   .sidebar{left:calc(-1 * var(--sidebar-w))}
   .sidebar.mob-open{left:0}
   .main{margin-left:0!important}
   .overlay.on{display:block}
   .topbar-ham{display:flex!important}
-  .page{padding:16px}
+  .page{padding:16px 14px 40px}
+  .col-right{position:static}
 }
-kbd{display:inline-block;padding:1px 5px;font-size:.7rem;border-radius:4px;border:1px solid var(--border2);background:var(--surface);color:var(--muted);font-family:monospace;line-height:1.5}
-  </style>
+body.dark{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#21253a;--surface3:#282d42;
+  --border:#2e3350;--border2:#353a55;
+  --text:#e8eaf6;--text-md:#c5cae9;--muted:#7986cb;--muted2:#5c6bc0;
+  --accent-lt:#1a1a3a;
+}
+body.dark input[type=text],body.dark input[type=number],body.dark select,body.dark textarea{background:var(--surface2);border-color:var(--border2);color:var(--text)}
+body.dark input:focus,body.dark select:focus,body.dark textarea:focus{background:var(--surface3)}
+body.dark .prev-arrow{background:var(--surface2);border-color:var(--border2)}
+body.dark .btn-secondary{background:var(--surface2);border-color:var(--border2)}
+</style>
 </head>
 <body>
-
 <div class="overlay" id="overlay" onclick="closeMob()"></div>
 
-<!-- SIDEBAR -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
-    <div class="logo-mark">🎵</div>
-    <span class="logo-name">Slide Studio</span>
-    <button class="sidebar-toggle" onclick="toggleSidebar()" title="Collapse">&#8942;</button>
+    <div class="logo-mark">&#127925;</div>
+    <div class="logo-text">
+      <span class="logo-name">Slide Studio</span>
+      <span class="logo-tagline">Khmer Worship</span>
+    </div>
+    <button class="sidebar-toggle" onclick="toggleSidebar()" title="Collapse">&#8801;</button>
   </div>
   <nav class="sidebar-nav">
     <div class="nav-section">Tools</div>
-    <button class="nav-btn active" id="nb-bible" onclick="go('bible')">
-      <span class="nav-icon">📖</span><span class="nav-label">Bible Slides</span>
-    </button>
-    <button class="nav-btn" id="nb-lyric" onclick="go('lyric')">
-      <span class="nav-icon">🎤</span><span class="nav-label">Extract Lyrics</span>
-    </button>
-    <button class="nav-btn" id="nb-notation" onclick="go('notation')">
-      <span class="nav-icon">🎼</span><span class="nav-label">Notation Cut</span>
-    </button>
+    <button class="nav-btn active" id="nb-bible" onclick="go('bible')"><span class="nav-icon">&#128214;</span><span class="nav-label">Bible Slides</span></button>
+    <button class="nav-btn" id="nb-lyric" onclick="go('lyric')"><span class="nav-icon">&#127908;</span><span class="nav-label">Lyric Slides</span></button>
+    <button class="nav-btn" id="nb-notation" onclick="go('notation')"><span class="nav-icon">&#127932;</span><span class="nav-label">Notation Cut</span></button>
   </nav>
   <div class="sidebar-footer">
-    <div class="nav-btn" style="cursor:default">
-      <span class="nav-icon">⚡</span>
-      <span class="nav-label" style="font-size:.72rem;color:var(--muted2)">Slide Studio v2</span>
+    <div class="version-pill">
+      <div class="version-dot"></div>
+      <span class="version-txt">Slide Studio v2 &middot; Live</span>
     </div>
   </div>
 </aside>
 
-<!-- MAIN -->
 <div class="main" id="main">
   <header class="topbar">
-    <button class="topbar-ham" id="ham" onclick="openMob()">☰</button>
-    <span class="topbar-title" id="topTitle">Bible Slides</span>
-    <span class="topbar-badge" id="topBadge">Generator</span>
+    <button class="topbar-ham" id="ham" onclick="openMob()">&#9776;</button>
+    <span class="page-icon" id="topIcon">&#128214;</span>
+    <div class="topbar-info">
+      <div class="topbar-title" id="topTitle">Bible Slides</div>
+      <div class="topbar-sub" id="topSub">Paste verses &middot; Style &middot; Export PPTX</div>
+    </div>
     <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <div class="kbd-hint">&larr; &rarr; to browse slides</div>
+      <button class="theme-btn" onclick="toggleDark()" title="Toggle dark mode" id="themeBtn">&#127769;</button>
+    </div>
   </header>
 
   <div class="page">
 
-    <!-- ══ BIBLE ══ -->
+    <!-- BIBLE -->
     <div class="panel active" id="panel-bible">
-      <div class="sec-head">
-        <div class="sec-title">📖 Bible Slide Generator</div>
-        <div class="sec-sub">Paste your verses, style them, and export a ready-to-project PowerPoint.</div>
+      <div class="page-header">
+        <div class="page-title">&#128214; Bible Slide Generator</div>
+        <div class="page-desc">Paste scripture verses, customise the style, and export a projection-ready PowerPoint file.</div>
       </div>
       <div class="two-col">
-        <!-- controls -->
-        <div>
+        <div class="col-left">
           <div class="card">
-            <div class="card-head">✏️ &nbsp;Verse Text</div>
-            <div class="field mb16">
-              <label>Paste verses — one verse per line</label>
+            <div class="card-head"><span class="card-head-icon">&#9999;&#65039;</span>Scripture Text</div>
+            <div class="field mb14">
+              <label>Paste verses &mdash; one verse per line</label>
               <textarea id="bText" rows="7" placeholder="For God so loved the world&#10;that he gave his one and only Son&#10;that whoever believes in him&#10;shall not perish but have eternal life." oninput="schedulePreview('bible')"></textarea>
             </div>
             <div class="field">
               <label>Scripture Reference</label>
-              <input type="text" id="bRef" placeholder="e.g. John 3:16" oninput="schedulePreview('bible')"/>
+              <input type="text" id="bRef" placeholder="e.g.  John 3:16" oninput="schedulePreview('bible')"/>
             </div>
           </div>
           <div class="card">
-            <div class="card-head">⚙️ &nbsp;Slide Settings</div>
-            <div class="g2 mb16">
+            <div class="card-head"><span class="card-head-icon">&#9881;&#65039;</span>Slide Settings</div>
+            <div class="g2 mb14">
               <div class="field">
                 <label>Verses per Slide</label>
                 <select id="bPer" onchange="schedulePreview('bible')">
-                  <option value="1">1 verse</option><option value="2">2 verses</option>
-                  <option value="3">3 verses</option><option value="4">4 verses</option>
+                  <option value="1">1 verse</option><option value="2">2 verses</option><option value="3">3 verses</option><option value="4">4 verses</option>
                 </select>
               </div>
               <div class="field">
-                <label>Alignment</label>
+                <label>Text Alignment</label>
                 <select id="bAlign" onchange="schedulePreview('bible')">
                   <option value="center">Center</option><option value="left">Left</option><option value="right">Right</option>
                 </select>
               </div>
             </div>
-            <div class="g2 mb16">
+            <div class="g2 mb14">
               <div class="field">
-                <label>Font</label>
+                <label>Font Family</label>
                 <select id="bFont" onchange="schedulePreview('bible')">
                   <optgroup label="Khmer Fonts">
-                    <option>Khmer OS</option>
-                    <option>Khmer OS Battambang</option>
-                    <option>Khmer OS Bokor</option>
-                    <option>Khmer OS Freehand</option>
-                    <option>Khmer OS Metal Chrieng</option>
-                    <option>Khmer OS Muol</option>
-                    <option>Khmer OS Muol Light</option>
-                    <option>Khmer OS Siemreap</option>
-                    <option>Khmer OS System</option>
-                    <option>Noto Serif Khmer</option>
-                    <option>Noto Sans Khmer</option>
+                    <option>Khmer OS Battambang</option><option>Khmer OS</option><option>Khmer OS Bokor</option>
+                    <option>Khmer OS Freehand</option><option>Khmer OS Metal Chrieng</option>
+                    <option>Khmer OS Muol</option><option>Khmer OS Moul Light</option>
+                    <option>Khmer OS Siemreap</option><option>Khmer OS System</option>
+                    <option>Noto Serif Khmer</option><option>Noto Sans Khmer</option>
                   </optgroup>
                   <optgroup label="Latin Fonts">
-                    <option>Arial</option>
-                    <option>Georgia</option>
-                    <option>Times New Roman</option>
-                    <option>Trebuchet MS</option>
-                    <option>Verdana</option>
+                    <option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Trebuchet MS</option><option>Verdana</option>
                   </optgroup>
                 </select>
               </div>
@@ -261,7 +281,23 @@ kbd{display:inline-block;padding:1px 5px;font-size:.7rem;border-radius:4px;borde
                 <input type="number" id="bSize" value="36" min="12" max="80" oninput="schedulePreview('bible')"/>
               </div>
             </div>
-            <div class="g3 mb16">
+            <div class="field mb14">
+              <label>Line Spacing</label>
+              <div class="range-row">
+                <input type="range" id="bSpacing" min="1.0" max="3.0" step="0.1" value="1.2" oninput="document.getElementById('bSpacingVal').textContent=parseFloat(this.value).toFixed(1)+'x';schedulePreview('bible')"/>
+                <span class="range-val" id="bSpacingVal">1.2x</span>
+              </div>
+            </div>
+            <label class="toggle-row">
+              <span class="toggle"><input type="checkbox" id="bBold" onchange="schedulePreview('bible')"/><span class="tog-track"></span></span>
+              <span class="tog-label">Bold text</span>
+            </label>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-head-icon">&#127912;</span>Colors</div>
+            <div class="section-label">Quick Presets</div>
+            <div class="color-presets" id="bPresets"></div>
+            <div class="g3 mb14">
               <div class="field">
                 <label>Background</label>
                 <div class="color-row">
@@ -277,132 +313,118 @@ kbd{display:inline-block;padding:1px 5px;font-size:.7rem;border-radius:4px;borde
                 </div>
               </div>
               <div class="field">
-                <label>Ref Color</label>
+                <label>Reference Color</label>
                 <div class="color-row">
                   <input type="color" id="bRefPick" value="#aaaaaa" oninput="syncPick('bRefPick','bRefHex');schedulePreview('bible')"/>
                   <input type="text"  id="bRefHex"  value="#aaaaaa" maxlength="7" oninput="syncHex('bRefHex','bRefPick');schedulePreview('bible')"/>
                 </div>
               </div>
             </div>
-            <div class="g2 mb16">
+            <div class="g2">
               <div class="field">
-                <label>Ref Font Size (pt)</label>
+                <label>Reference Font Size (pt)</label>
                 <input type="number" id="bRefSize" value="20" min="10" max="40" oninput="schedulePreview('bible')"/>
               </div>
               <div class="field" style="justify-content:flex-end;padding-top:20px">
                 <label class="toggle-row">
-                  <span class="toggle"><input type="checkbox" id="bBold" onchange="schedulePreview('bible')"/><span class="tog-track"></span></span>
-                  <span class="tog-label">Bold text</span>
+                  <span class="toggle"><input type="checkbox" id="bRefEach" checked onchange="schedulePreview('bible')"/><span class="tog-track"></span></span>
+                  <span class="tog-label">Reference on every slide</span>
                 </label>
               </div>
             </div>
-            <label class="toggle-row">
-              <span class="toggle"><input type="checkbox" id="bRefEach" checked onchange="schedulePreview('bible')"/><span class="tog-track"></span></span>
-              <span class="tog-label">Show reference on every slide</span>
-            </label>
-            <div class="divider"></div>
-            <div class="field">
-              <label>Line Spacing</label>
-              <div class="range-row">
-                <input type="range" id="bSpacing" min="1.0" max="3.0" step="0.1" value="1.2"
-                  oninput="document.getElementById('bSpacingVal').textContent=parseFloat(this.value).toFixed(1)+'×';schedulePreview('bible')"/>
-                <span class="range-val" id="bSpacingVal">1.2×</span>
-              </div>
-            </div>
           </div>
-          <button class="btn btn-primary btn-full" id="bBtn" onclick="genBible()">⬇&nbsp; Generate Bible Slides</button>
+          <button class="btn btn-primary btn-full btn-generate" id="bBtn" onclick="genBible()">
+            &#11015; Download Bible Slides (.pptx)
+          </button>
           <div class="status" id="bStatus"></div>
         </div>
-        <!-- preview -->
-        <div>
-          <div class="card">
-            <div class="card-head">👁️ &nbsp;Slide Preview</div>
-            <div class="preview-wrap">
-              <div class="preview-slide" id="bSlide">
-                <div class="prev-body" id="bBody">Your verse will appear here…</div>
-                <div class="prev-ref"  id="bRefEl"></div>
+        <div class="col-right">
+          <div class="preview-card">
+            <div class="preview-card-head">
+              <span class="preview-card-title">&#128065; Live Preview</span>
+              <span class="preview-card-count" id="bCount">&ndash;</span>
+            </div>
+            <div class="preview-body">
+              <div class="preview-wrap">
+                <div class="preview-slide" id="bSlide" style="background:#000">
+                  <div class="prev-body" id="bBody" style="color:#fff">Your verse will appear here&hellip;</div>
+                  <div class="prev-ref" id="bRefEl"></div>
+                </div>
+                <div class="prev-nav left"><button class="prev-arrow" id="bPrev" onclick="navSlide('b',-1)" disabled>&#8592;</button></div>
+                <div class="prev-nav right"><button class="prev-arrow" id="bNext" onclick="navSlide('b',1)" disabled>&#8594;</button></div>
               </div>
-              <div class="prev-nav left"><button class="prev-arrow" id="bPrev" onclick="navSlide('b',-1)">&#8592;</button></div>
-              <div class="prev-nav right"><button class="prev-arrow" id="bNext" onclick="navSlide('b',1)">&#8594;</button></div>
             </div>
             <div class="prev-footer">
-              <span class="prev-count" id="bCount">–</span>
+              <div class="prev-hint"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Browse</div>
               <div class="prev-dots" id="bDots"></div>
             </div>
-            <div class="prev-hint">Use arrows or ← → keys to browse</div>
+          </div>
+          <div class="info-box">
+            <div class="info-box-title">&#128161; Font Embedding</div>
+            <div class="info-box-body">Khmer OS fonts are <strong>embedded inside</strong> the downloaded .pptx &mdash; so they display correctly on any computer, even without Khmer fonts installed.</div>
           </div>
         </div>
       </div>
-    </div><!-- /bible -->
+    </div>
 
-    <!-- ══ LYRIC ══ -->
+    <!-- LYRIC -->
     <div class="panel" id="panel-lyric">
-      <div class="sec-head">
-        <div class="sec-title">🎤 Extract Lyrics → Slides</div>
-        <div class="sec-sub">Upload a song PDF or image to extract Khmer/English lyrics, then export to PowerPoint.</div>
+      <div class="page-header">
+        <div class="page-title">&#127908; Lyric Slides</div>
+        <div class="page-desc">Upload a song PDF or image to extract Khmer lyrics via OCR, then export a styled PowerPoint.</div>
       </div>
       <div class="two-col">
-        <div>
+        <div class="col-left">
           <div class="card">
-            <div class="card-head">1️⃣ &nbsp;Upload &amp; Extract</div>
+            <div class="card-head"><span class="card-head-icon">1&#65039;&#8419;</span>Upload &amp; Extract</div>
             <div class="drop-zone" id="lDrop">
               <input type="file" id="lFile" accept=".pdf,.png,.jpg,.jpeg" onchange="lFileChosen(this)"/>
-              <div class="drop-icon">📄</div>
+              <div class="drop-icon">&#128196;</div>
               <div class="drop-title">Drop file here or click to browse</div>
-              <div class="drop-sub">PDF · PNG · JPG &nbsp;·&nbsp; or press <kbd>Ctrl+V</kbd> / <kbd>⌘V</kbd> to paste</div>
+              <div class="drop-sub">PDF &middot; PNG &middot; JPG<br/>or press <kbd>Ctrl+V</kbd> / <kbd>&#8984;V</kbd> to paste from clipboard</div>
             </div>
-            <div class="file-pill" id="lPill"><span>✓</span><span id="lName"></span></div>
+            <div class="file-pill" id="lPill"><span>&#128206;</span><span id="lName"></span></div>
             <div style="margin-top:12px">
-              <button class="btn btn-ghost btn-full" onclick="doExtract()" id="extractBtn">🔍&nbsp; Extract Lyrics via OCR</button>
+              <button class="btn btn-secondary btn-full" onclick="doExtract()" id="extractBtn">&#128269; Extract Lyrics via OCR</button>
             </div>
             <div class="status" id="lExtStatus"></div>
           </div>
           <div class="card">
-            <div class="card-head">2️⃣ &nbsp;Edit Lyrics</div>
+            <div class="card-head"><span class="card-head-icon">2&#65039;&#8419;</span>Edit Lyrics</div>
             <div class="field">
-              <label>One line = one lyric phrase — edit freely after extraction</label>
-              <textarea id="lText" rows="10" placeholder="Extracted lyrics appear here…&#10;You can also type or paste directly." oninput="schedulePreview('lyric')"></textarea>
+              <label>One line = one phrase &middot; Edit after extraction or type directly</label>
+              <textarea id="lText" rows="10" placeholder="Extracted lyrics appear here&#10;You can also type or paste directly." oninput="schedulePreview('lyric')"></textarea>
             </div>
           </div>
           <div class="card">
-            <div class="card-head">3️⃣ &nbsp;Style</div>
-            <div class="g2 mb16">
+            <div class="card-head"><span class="card-head-icon">3&#65039;&#8419;</span>Style</div>
+            <div class="g2 mb14">
               <div class="field">
                 <label>Lines per Slide</label>
                 <select id="lPer" onchange="schedulePreview('lyric')">
-                  <option value="1">1 line</option><option value="2" selected>2 lines</option>
-                  <option value="3">3 lines</option><option value="4">4 lines</option>
+                  <option value="1">1 line</option><option value="2" selected>2 lines</option><option value="3">3 lines</option><option value="4">4 lines</option>
                 </select>
               </div>
               <div class="field">
-                <label>Alignment</label>
+                <label>Text Alignment</label>
                 <select id="lAlign" onchange="schedulePreview('lyric')">
                   <option value="center">Center</option><option value="left">Left</option><option value="right">Right</option>
                 </select>
               </div>
             </div>
-            <div class="g2 mb16">
+            <div class="g2 mb14">
               <div class="field">
-                <label>Font</label>
+                <label>Font Family</label>
                 <select id="lFont" onchange="schedulePreview('lyric')">
                   <optgroup label="Khmer Fonts">
-                    <option>Khmer OS</option>
-                    <option>Khmer OS Battambang</option>
-                    <option>Khmer OS Bokor</option>
-                    <option>Khmer OS Freehand</option>
-                    <option>Khmer OS Metal Chrieng</option>
-                    <option>Khmer OS Muol</option>
-                    <option>Khmer OS Muol Light</option>
-                    <option>Khmer OS Siemreap</option>
-                    <option>Khmer OS System</option>
-                    <option>Noto Serif Khmer</option>
-                    <option>Noto Sans Khmer</option>
+                    <option>Khmer OS Battambang</option><option>Khmer OS</option><option>Khmer OS Bokor</option>
+                    <option>Khmer OS Freehand</option><option>Khmer OS Metal Chrieng</option>
+                    <option>Khmer OS Muol</option><option>Khmer OS Moul Light</option>
+                    <option>Khmer OS Siemreap</option><option>Khmer OS System</option>
+                    <option>Noto Serif Khmer</option><option>Noto Sans Khmer</option>
                   </optgroup>
                   <optgroup label="Latin Fonts">
-                    <option>Arial</option>
-                    <option>Georgia</option>
-                    <option>Times New Roman</option>
-                    <option>Verdana</option>
+                    <option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Verdana</option>
                   </optgroup>
                 </select>
               </div>
@@ -411,7 +433,21 @@ kbd{display:inline-block;padding:1px 5px;font-size:.7rem;border-radius:4px;borde
                 <input type="number" id="lSize" value="40" min="12" max="90" oninput="schedulePreview('lyric')"/>
               </div>
             </div>
-            <div class="g2 mb16">
+            <div class="field mb14">
+              <label>Line Spacing</label>
+              <div class="range-row">
+                <input type="range" id="lSpacing" min="1.0" max="3.0" step="0.1" value="1.5" oninput="document.getElementById('lSpacingVal').textContent=parseFloat(this.value).toFixed(1)+'x';schedulePreview('lyric')"/>
+                <span class="range-val" id="lSpacingVal">1.5x</span>
+              </div>
+            </div>
+            <label class="toggle-row mb14">
+              <span class="toggle"><input type="checkbox" id="lBold" onchange="schedulePreview('lyric')"/><span class="tog-track"></span></span>
+              <span class="tog-label">Bold text</span>
+            </label>
+            <div class="divider"></div>
+            <div class="section-label">Colors</div>
+            <div class="color-presets" id="lPresets"></div>
+            <div class="g2">
               <div class="field">
                 <label>Background</label>
                 <div class="color-row">
@@ -427,321 +463,207 @@ kbd{display:inline-block;padding:1px 5px;font-size:.7rem;border-radius:4px;borde
                 </div>
               </div>
             </div>
-            <label class="toggle-row">
-              <span class="toggle"><input type="checkbox" id="lBold" onchange="schedulePreview('lyric')"/><span class="tog-track"></span></span>
-              <span class="tog-label">Bold text</span>
-            </label>
-            <div class="divider"></div>
-            <div class="field">
-              <label>Line Spacing</label>
-              <div class="range-row">
-                <input type="range" id="lSpacing" min="1.0" max="3.0" step="0.1" value="1.5"
-                  oninput="document.getElementById('lSpacingVal').textContent=parseFloat(this.value).toFixed(1)+'×';schedulePreview('lyric')"/>
-                <span class="range-val" id="lSpacingVal">1.5×</span>
-              </div>
-            </div>
           </div>
-          <button class="btn btn-primary btn-full" id="lBtn" onclick="genLyric()">⬇&nbsp; Generate Lyric Slides</button>
+          <button class="btn btn-primary btn-full btn-generate" id="lBtn" onclick="genLyric()">
+            &#11015; Download Lyric Slides (.pptx)
+          </button>
           <div class="status" id="lStatus"></div>
         </div>
-        <!-- preview -->
-        <div>
-          <div class="card">
-            <div class="card-head">👁️ &nbsp;Slide Preview</div>
-            <div class="preview-wrap">
-              <div class="preview-slide" id="lSlide">
-                <div class="prev-body" id="lBody">Lyrics will appear here…</div>
+        <div class="col-right">
+          <div class="preview-card">
+            <div class="preview-card-head">
+              <span class="preview-card-title">&#128065; Live Preview</span>
+              <span class="preview-card-count" id="lCount">&ndash;</span>
+            </div>
+            <div class="preview-body">
+              <div class="preview-wrap">
+                <div class="preview-slide" id="lSlide" style="background:#000">
+                  <div class="prev-body" id="lBody" style="color:#fff">Lyrics will appear here&hellip;</div>
+                </div>
+                <div class="prev-nav left"><button class="prev-arrow" id="lPrev" onclick="navSlide('l',-1)" disabled>&#8592;</button></div>
+                <div class="prev-nav right"><button class="prev-arrow" id="lNext" onclick="navSlide('l',1)" disabled>&#8594;</button></div>
               </div>
-              <div class="prev-nav left"><button class="prev-arrow" id="lPrev" onclick="navSlide('l',-1)">&#8592;</button></div>
-              <div class="prev-nav right"><button class="prev-arrow" id="lNext" onclick="navSlide('l',1)">&#8594;</button></div>
             </div>
             <div class="prev-footer">
-              <span class="prev-count" id="lCount">–</span>
+              <div class="prev-hint"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Browse</div>
               <div class="prev-dots" id="lDots"></div>
             </div>
-            <div class="prev-hint">Use arrows or ← → keys to browse</div>
+          </div>
+          <div class="info-box">
+            <div class="info-box-title">&#128161; OCR Tip</div>
+            <div class="info-box-body">The extractor <strong>skips notation rows</strong> and reads only the Khmer text beneath each staff. Chord symbols (Am, G/B&hellip;) are filtered automatically.</div>
           </div>
         </div>
       </div>
-    </div><!-- /lyric -->
+    </div>
 
-    <!-- ══ NOTATION ══ -->
+    <!-- NOTATION -->
     <div class="panel" id="panel-notation">
-      <div class="sec-head">
-        <div class="sec-title">🎼 Notation Cut</div>
-        <div class="sec-sub">Upload a scanned song PDF — each staff row + Khmer lyric line becomes one slide.</div>
+      <div class="page-header">
+        <div class="page-title">&#127932; Notation Cut</div>
+        <div class="page-desc">Upload a scanned song PDF &mdash; each staff row paired with its Khmer lyric becomes one slide.</div>
       </div>
       <div class="two-col">
-        <div>
+        <div class="col-left">
           <div class="card">
-            <div class="card-head">📤 &nbsp;Upload Song PDF</div>
+            <div class="card-head"><span class="card-head-icon">&#128228;</span>Upload Song PDF</div>
             <div class="drop-zone" id="nDrop">
               <input type="file" id="nFile" accept=".pdf" onchange="nFileChosen(this)"/>
-              <div class="drop-icon" style="font-size:2.2rem">𝄞</div>
+              <div class="drop-icon">&#119070;</div>
               <div class="drop-title">Drop PDF here or click to browse</div>
-              <div class="drop-sub">Music notation PDF &nbsp;·&nbsp; or press <kbd>Ctrl+V</kbd> / <kbd>⌘V</kbd> to paste</div>
+              <div class="drop-sub">Music notation PDF only<br/>or press <kbd>Ctrl+V</kbd> / <kbd>&#8984;V</kbd> to paste</div>
             </div>
-            <div class="file-pill" id="nPill"><span>✓</span><span id="nName"></span></div>
+            <div class="file-pill" id="nPill"><span>&#128206;</span><span id="nName"></span></div>
           </div>
           <div class="card">
-            <div class="card-head">⚙️ &nbsp;Settings</div>
-            <div class="g2 mb16">
+            <div class="card-head"><span class="card-head-icon">&#9881;&#65039;</span>Settings</div>
+            <div class="g2 mb14">
               <div class="field">
                 <label>Lines per Slide</label>
                 <select id="nLines">
-                  <option value="1">1 line — biggest</option><option value="2" selected>2 lines</option>
-                  <option value="3">3 lines</option><option value="4">4 lines</option>
+                  <option value="1">1 line &mdash; biggest</option><option value="2" selected>2 lines</option><option value="3">3 lines</option><option value="4">4 lines</option>
                 </select>
               </div>
               <div class="field">
-                <label>Quality (DPI)</label>
+                <label>Scan Quality (DPI)</label>
                 <div class="range-row">
-                  <input type="range" id="nDpi" min="150" max="300" step="50" value="200"
-                    oninput="document.getElementById('nDpiVal').textContent=this.value"/>
+                  <input type="range" id="nDpi" min="150" max="300" step="50" value="200" oninput="document.getElementById('nDpiVal').textContent=this.value"/>
                   <span class="range-val" id="nDpiVal">200</span>
                 </div>
               </div>
             </div>
           </div>
-          <button class="btn btn-primary btn-full" id="nBtn" onclick="genNotation()">⬇&nbsp; Generate Notation Slides</button>
+          <button class="btn btn-primary btn-full btn-generate" id="nBtn" onclick="genNotation()">
+            &#11015; Generate Notation Slides (.pptx)
+          </button>
           <div class="status" id="nStatus"></div>
         </div>
-        <div>
-          <div class="tip-card">
-            <div class="tip-title">💡 Tip</div>
-            <div class="tip-body">Use <strong>1 line per slide</strong> for the largest, clearest display — ideal for small projectors. Use <strong>2 lines</strong> to match the original page layout.</div>
+        <div class="col-right">
+          <div class="info-box">
+            <div class="info-box-title">&#128161; Best Results</div>
+            <div class="info-box-body">Use <strong>1 line per slide</strong> for the largest, clearest display. Use <strong>2 lines</strong> to match the original page layout.</div>
           </div>
           <div class="card">
-            <div class="card-head">ℹ️ &nbsp;How It Works</div>
+            <div class="card-head"><span class="card-head-icon">&#8505;&#65039;</span>How It Works</div>
             <div class="steps">
-              <div class="step"><div class="step-num">1</div><p>Upload your scanned song PDF (notation + Khmer lyrics)</p></div>
-              <div class="step"><div class="step-num">2</div><p>App detects each staff row and pairs it with the Khmer lyric line below using ink-density analysis</p></div>
-              <div class="step"><div class="step-num">3</div><p>Lines are grouped per your setting, cropped full-width, and scaled up to fill the slide</p></div>
-              <div class="step"><div class="step-num">4</div><p>Download your .pptx — ready for church projection</p></div>
+              <div class="step"><div class="step-num">1</div><div class="step-content"><p>Upload your scanned song PDF (notation + Khmer lyrics)</p></div></div>
+              <div class="step"><div class="step-num">2</div><div class="step-content"><p>App detects each <strong>staff row</strong> using ink-density analysis</p></div></div>
+              <div class="step"><div class="step-num">3</div><div class="step-content"><p>Lines are grouped, cropped full-width, and scaled to fill each slide</p></div></div>
+              <div class="step"><div class="step-num">4</div><div class="step-content"><p>Download your <strong>.pptx</strong> &mdash; ready for church projection</p></div></div>
             </div>
           </div>
         </div>
       </div>
-    </div><!-- /notation -->
+    </div>
 
-  </div><!-- /page -->
-</div><!-- /main -->
+  </div>
+</div>
 
 <script>
-/* SIDEBAR */
 let isMini=false;
 function toggleSidebar(){isMini=!isMini;document.getElementById('sidebar').classList.toggle('mini',isMini);document.body.classList.toggle('mini',isMini)}
 function openMob(){document.getElementById('sidebar').classList.add('mob-open');document.getElementById('overlay').classList.add('on')}
 function closeMob(){document.getElementById('sidebar').classList.remove('mob-open');document.getElementById('overlay').classList.remove('on')}
-
-/* PANEL ROUTING */
-const META={bible:{title:'Bible Slides',badge:'Generator'},lyric:{title:'Extract Lyrics',badge:'OCR + Slides'},notation:{title:'Notation Cut',badge:'PDF → Slides'}};
-function go(id){
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-'+id).classList.add('active');
-  document.getElementById('nb-'+id).classList.add('active');
-  document.getElementById('topTitle').textContent=META[id].title;
-  document.getElementById('topBadge').textContent=META[id].badge;
-  closeMob();
-}
-
-/* COLOR SYNC */
+function toggleDark(){const dark=document.body.classList.toggle('dark');document.getElementById('themeBtn').textContent=dark?'\u2600\uFE0F':'\uD83C\uDF19';localStorage.setItem('theme',dark?'dark':'light')}
+(function(){if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');document.getElementById('themeBtn').textContent='\u2600\uFE0F'}})();
+const META={bible:{title:'Bible Slides',sub:'Paste verses \u00B7 Style \u00B7 Export PPTX',icon:'\uD83D\uDCD6'},lyric:{title:'Lyric Slides',sub:'OCR extract \u00B7 Edit \u00B7 Export PPTX',icon:'\uD83C\uDFA4'},notation:{title:'Notation Cut',sub:'PDF scan \u2192 Staff slides',icon:'\uD83C\uDFBC'}};
+function go(id){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('panel-'+id).classList.add('active');document.getElementById('nb-'+id).classList.add('active');document.getElementById('topTitle').textContent=META[id].title;document.getElementById('topSub').textContent=META[id].sub;document.getElementById('topIcon').textContent=META[id].icon;closeMob()}
 function syncPick(pickId,hexId){document.getElementById(hexId).value=document.getElementById(pickId).value}
 function syncHex(hexId,pickId){const v=document.getElementById(hexId).value;if(/^#[0-9a-fA-F]{6}$/.test(v))document.getElementById(pickId).value=v}
-
-/* STATUS */
+const PRESETS=[{label:'Black',bg:'#000000',txt:'#ffffff',ref:'#aaaaaa'},{label:'Deep Blue',bg:'#0a1628',txt:'#e8f4fd',ref:'#7ab8e8'},{label:'Navy',bg:'#1a237e',txt:'#ffffff',ref:'#90caf9'},{label:'Dark Green',bg:'#1b5e20',txt:'#f1f8e9',ref:'#a5d6a7'},{label:'Burgundy',bg:'#4a0000',txt:'#fff8f8',ref:'#ef9a9a'},{label:'Slate',bg:'#263238',txt:'#eceff1',ref:'#90a4ae'},{label:'White',bg:'#ffffff',txt:'#1a1a2e',ref:'#666699'},{label:'Warm Cream',bg:'#fdf6e3',txt:'#2d2416',ref:'#8b6914'}];
+function buildPresets(cid,bpid,bhid,tpid,thid,rpid,rhid,which){const c=document.getElementById(cid);PRESETS.forEach(p=>{const el=document.createElement('div');el.className='color-preset';el.title=p.label;el.style.background=p.bg;el.style.border='2.5px solid '+(p.bg==='#ffffff'?'#ccc':p.bg);el.onclick=()=>{document.getElementById(bpid).value=p.bg;document.getElementById(bhid).value=p.bg;document.getElementById(tpid).value=p.txt;document.getElementById(thid).value=p.txt;if(rpid){document.getElementById(rpid).value=p.ref;document.getElementById(rhid).value=p.ref}schedulePreview(which)};c.appendChild(el)})}
+buildPresets('bPresets','bBgPick','bBgHex','bTxtPick','bTxtHex','bRefPick','bRefHex','bible');
+buildPresets('lPresets','lBgPick','lBgHex','lTxtPick','lTxtHex',null,null,'lyric');
 function setStatus(id,type,msg){const el=document.getElementById(id);el.className='status on '+type;el.innerHTML=type==='loading'?`<div class="spin"></div><span>${msg}</span>`:`<span>${msg}</span>`}
 function clearStatus(id){document.getElementById(id).className='status'}
-
-/* DOWNLOAD */
 function dl(blob,name){const u=URL.createObjectURL(blob);const a=Object.assign(document.createElement('a'),{href:u,download:name});a.click();URL.revokeObjectURL(u)}
-
-/* CAROUSEL */
 const carousels={b:{slides:[],idx:0},l:{slides:[],idx:0}};
 function renderCarousel(pfx){
   const c=carousels[pfx],idx=c.idx,s=c.slides[idx];
   const slide=document.getElementById(pfx+'Slide');
   const body=document.getElementById(pfx+'Body');
-  const ref=document.getElementById(pfx+'RefEl');
+  const ref=pfx==='b'?document.getElementById('bRefEl'):null;
   const count=document.getElementById(pfx+'Count');
   const dots=document.getElementById(pfx+'Dots');
   const prev=document.getElementById(pfx+'Prev');
   const next=document.getElementById(pfx+'Next');
-  if(!s){
-    body.textContent=pfx==='b'?'Your verse will appear here…':'Lyrics will appear here…';
-    body.style.cssText='';
-    if(ref){ref.textContent='';ref.style.cssText=''}
-    slide.style.background='';
-    count.textContent='–';dots.innerHTML='';
-    if(prev)prev.disabled=true;if(next)next.disabled=true;
-    return;
-  }
-  const fs=Math.min(s.fontSize*0.55,28);
-  slide.style.background=s.bg;
-  body.textContent=s.text;
-  body.style.color=s.color;
-  body.style.fontFamily=s.font;
-  body.style.fontSize=fs+'px';
-  body.style.fontWeight=s.bold?'700':'400';
-  body.style.textAlign=s.align;
-  body.style.lineHeight=(s.lineSpacing||1.5);
-  if(ref){ref.textContent=s.ref||'';ref.style.color=s.refColor;ref.style.fontFamily=s.font}
+  if(!s){body.textContent=pfx==='b'?'Your verse will appear here\u2026':'Lyrics will appear here\u2026';body.style.cssText='text-align:center;color:#fff';if(ref){ref.textContent='';ref.style.cssText=''}slide.style.background='#111';count.textContent='\u2013';dots.innerHTML='';if(prev)prev.disabled=true;if(next)next.disabled=true;return}
+  const fs=Math.min(s.fontSize*0.54,30);
+  slide.style.background=s.bg;body.textContent=s.text;body.style.color=s.color;body.style.fontFamily=s.font+',serif';body.style.fontSize=fs+'px';body.style.fontWeight=s.bold?'700':'400';body.style.textAlign=s.align;body.style.lineHeight=(s.lineSpacing||1.5);
+  if(ref){ref.textContent=s.ref||'';ref.style.color=s.refColor;ref.style.fontFamily=s.font+',serif';ref.style.fontSize=Math.min((s.refSize||20)*0.45,14)+'px'}
   count.textContent=`${idx+1} / ${c.slides.length}`;
-  const max=Math.min(c.slides.length,10);
-  dots.innerHTML='';
-  for(let i=0;i<max;i++){const d=document.createElement('div');d.className='dot'+(i===idx?' on':'');dots.appendChild(d)}
-  if(prev)prev.disabled=idx===0;
-  if(next)next.disabled=idx===c.slides.length-1;
+  const max=Math.min(c.slides.length,12);dots.innerHTML='';
+  for(let i=0;i<max;i++){const d=document.createElement('div');d.className='dot'+(i===idx?' on':'');d.onclick=()=>{c.idx=i;renderCarousel(pfx)};dots.appendChild(d)}
+  if(prev)prev.disabled=idx===0;if(next)next.disabled=idx===c.slides.length-1;
 }
 function navSlide(pfx,dir){const c=carousels[pfx];c.idx=Math.max(0,Math.min(c.slides.length-1,c.idx+dir));renderCarousel(pfx)}
 document.addEventListener('keydown',e=>{
+  if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
   const active=document.querySelector('.panel.active');if(!active)return;
-  const pfx=active.id==='panel-bible'?'b':active.id==='panel-lyric'?'l':null;
-  if(!pfx)return;
-  if(e.key==='ArrowLeft')navSlide(pfx,-1);
-  if(e.key==='ArrowRight')navSlide(pfx,1);
+  const pfx=active.id==='panel-bible'?'b':active.id==='panel-lyric'?'l':null;if(!pfx)return;
+  if(e.key==='ArrowLeft'){e.preventDefault();navSlide(pfx,-1)}
+  if(e.key==='ArrowRight'){e.preventDefault();navSlide(pfx,1)}
 });
-
-/* DEBOUNCED PREVIEW */
 const timers={};
-function schedulePreview(which){clearTimeout(timers[which]);timers[which]=setTimeout(()=>fetchPreview(which),350)}
-function biblePayload(){return{kind:'bible',text:document.getElementById('bText').value,per_slide:+document.getElementById('bPer').value,bg_color:document.getElementById('bBgHex').value,text_color:document.getElementById('bTxtHex').value,ref_color:document.getElementById('bRefHex').value,font:document.getElementById('bFont').value,font_size:+document.getElementById('bSize').value,ref_size:+document.getElementById('bRefSize').value,bold:document.getElementById('bBold').checked,align:document.getElementById('bAlign').value,reference:document.getElementById('bRef').value,show_ref_each:document.getElementById('bRefEach').checked,line_spacing:parseFloat(document.getElementById('bSpacing').value)}}
-function lyricPayload(){return{kind:'lyric',text:document.getElementById('lText').value,per_slide:+document.getElementById('lPer').value,bg_color:document.getElementById('lBgHex').value,text_color:document.getElementById('lTxtHex').value,font:document.getElementById('lFont').value,font_size:+document.getElementById('lSize').value,bold:document.getElementById('lBold').checked,align:document.getElementById('lAlign').value,line_spacing:parseFloat(document.getElementById('lSpacing').value)}}
+function schedulePreview(which){clearTimeout(timers[which]);timers[which]=setTimeout(()=>fetchPreview(which),300)}
+function biblePayload(){return{kind:'bible',text:document.getElementById('bText').value,per_slide:+document.getElementById('bPer').value,bg_color:document.getElementById('bBgHex').value.replace('#',''),text_color:document.getElementById('bTxtHex').value.replace('#',''),ref_color:document.getElementById('bRefHex').value.replace('#',''),font:document.getElementById('bFont').value,font_size:+document.getElementById('bSize').value,ref_size:+document.getElementById('bRefSize').value,bold:document.getElementById('bBold').checked,align:document.getElementById('bAlign').value,reference:document.getElementById('bRef').value,show_ref_each:document.getElementById('bRefEach').checked,line_spacing:parseFloat(document.getElementById('bSpacing').value)}}
+function lyricPayload(){return{kind:'lyric',text:document.getElementById('lText').value,per_slide:+document.getElementById('lPer').value,bg_color:document.getElementById('lBgHex').value.replace('#',''),text_color:document.getElementById('lTxtHex').value.replace('#',''),font:document.getElementById('lFont').value,font_size:+document.getElementById('lSize').value,bold:document.getElementById('lBold').checked,align:document.getElementById('lAlign').value,line_spacing:parseFloat(document.getElementById('lSpacing').value)}}
 async function fetchPreview(which){
   const pfx=which==='bible'?'b':'l';
   const payload=which==='bible'?biblePayload():lyricPayload();
   if(!payload.text.trim()){carousels[pfx].slides=[];carousels[pfx].idx=0;renderCarousel(pfx);return}
-  try{
-    const res=await fetch('/api/preview-slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    const data=await res.json();
-    carousels[pfx].slides=data;carousels[pfx].idx=0;renderCarousel(pfx);
-  }catch(_){}
+  try{const res=await fetch('/api/preview-slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();carousels[pfx].slides=data;carousels[pfx].idx=0;renderCarousel(pfx)}catch(_){}
 }
-
-/* BIBLE GEN */
 async function genBible(){
   const text=document.getElementById('bText').value.trim();
-  if(!text){setStatus('bStatus','err','⚠ Please paste some verse text first.');return}
+  if(!text){setStatus('bStatus','err','\u26A0 Please paste some verse text first.');return}
   const btn=document.getElementById('bBtn');btn.disabled=true;
-  setStatus('bStatus','loading','Building slides…');
-  try{
-    const res=await fetch('/api/bible',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(biblePayload())});
-    if(!res.ok)throw new Error((await res.json()).error);
-    dl(await res.blob(),'bible_slides.pptx');
-    setStatus('bStatus','ok','✓ Downloaded! Open the .pptx file.');
-  }catch(e){setStatus('bStatus','err','⚠ '+e.message)}
-  finally{btn.disabled=false}
+  setStatus('bStatus','loading','Building slides\u2026');
+  try{const res=await fetch('/api/bible',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(biblePayload())});if(!res.ok)throw new Error((await res.json()).error);dl(await res.blob(),'bible_slides.pptx');setStatus('bStatus','ok','\u2713 Downloaded! Open the .pptx file to present.')}
+  catch(e){setStatus('bStatus','err','\u26A0 '+e.message)}finally{btn.disabled=false}
 }
-
-/* LYRIC */
 function lFileChosen(inp){if(inp.files[0]){document.getElementById('lName').textContent=inp.files[0].name;document.getElementById('lPill').classList.add('on')}}
 async function doExtract(){
   const fi=document.getElementById('lFile');
-  if(!fi.files[0]){setStatus('lExtStatus','err','⚠ Upload a file first.');return}
+  if(!fi.files[0]){setStatus('lExtStatus','err','\u26A0 Upload a file first.');return}
   const btn=document.getElementById('extractBtn');btn.disabled=true;
-  setStatus('lExtStatus','loading','Running OCR… this may take a moment.');
+  setStatus('lExtStatus','loading','Running OCR \u2014 this may take a moment\u2026');
   const fd=new FormData();fd.append('file',fi.files[0]);
-  try{
-    const res=await fetch('/api/extract-lyrics',{method:'POST',body:fd});
-    if(!res.ok)throw new Error((await res.json()).error);
-    const data=await res.json();
-    document.getElementById('lText').value=data.text;
-    schedulePreview('lyric');
-    setStatus('lExtStatus','ok','✓ Lyrics extracted! Edit below if needed.');
-  }catch(e){setStatus('lExtStatus','err','⚠ '+e.message)}
-  finally{btn.disabled=false}
+  try{const res=await fetch('/api/extract-lyrics',{method:'POST',body:fd});if(!res.ok)throw new Error((await res.json()).error);const data=await res.json();document.getElementById('lText').value=data.text;schedulePreview('lyric');setStatus('lExtStatus','ok','\u2713 Lyrics extracted! Edit below if needed.')}
+  catch(e){setStatus('lExtStatus','err','\u26A0 '+e.message)}finally{btn.disabled=false}
 }
 async function genLyric(){
   const text=document.getElementById('lText').value.trim();
-  if(!text){setStatus('lStatus','err','⚠ No lyrics. Extract or type lyrics first.');return}
+  if(!text){setStatus('lStatus','err','\u26A0 No lyrics. Extract or type lyrics first.');return}
   const btn=document.getElementById('lBtn');btn.disabled=true;
-  setStatus('lStatus','loading','Building slides…');
-  try{
-    const res=await fetch('/api/lyric-slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,...lyricPayload(),lines_per_slide:+document.getElementById('lPer').value,line_spacing:parseFloat(document.getElementById('lSpacing').value)})});
-    if(!res.ok)throw new Error((await res.json()).error);
-    dl(await res.blob(),'lyric_slides.pptx');
-    setStatus('lStatus','ok','✓ Downloaded!');
-  }catch(e){setStatus('lStatus','err','⚠ '+e.message)}
-  finally{btn.disabled=false}
+  setStatus('lStatus','loading','Building slides\u2026');
+  try{const payload={text,...lyricPayload(),lines_per_slide:+document.getElementById('lPer').value,line_spacing:parseFloat(document.getElementById('lSpacing').value)};const res=await fetch('/api/lyric-slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!res.ok)throw new Error((await res.json()).error);dl(await res.blob(),'lyric_slides.pptx');setStatus('lStatus','ok','\u2713 Downloaded!')}
+  catch(e){setStatus('lStatus','err','\u26A0 '+e.message)}finally{btn.disabled=false}
 }
-
-/* NOTATION */
 function nFileChosen(inp){if(inp.files[0]){document.getElementById('nName').textContent=inp.files[0].name;document.getElementById('nPill').classList.add('on')}}
-const notMsgs=['Converting PDF…','Detecting staff rows…','Pairing notation + lyrics…','Building slides…','Finalising…'];
+const notMsgs=['Converting PDF pages\u2026','Detecting staff rows\u2026','Pairing notation + lyrics\u2026','Building slides\u2026','Almost done\u2026'];
 async function genNotation(){
   const fi=document.getElementById('nFile');
-  if(!fi.files[0]){setStatus('nStatus','err','⚠ Upload a PDF first.');return}
+  if(!fi.files[0]){setStatus('nStatus','err','\u26A0 Upload a PDF first.');return}
   const btn=document.getElementById('nBtn');btn.disabled=true;
   let mi=0;setStatus('nStatus','loading',notMsgs[0]);
   const iv=setInterval(()=>{mi=(mi+1)%notMsgs.length;setStatus('nStatus','loading',notMsgs[mi])},2200);
-  const fd=new FormData();
-  fd.append('pdf',fi.files[0]);
-  fd.append('lines_per_slide',document.getElementById('nLines').value);
-  fd.append('dpi',document.getElementById('nDpi').value);
-  try{
-    const res=await fetch('/api/notation',{method:'POST',body:fd});
-    clearInterval(iv);
-    if(!res.ok)throw new Error((await res.json()).error);
-    dl(await res.blob(),'notation_slides.pptx');
-    setStatus('nStatus','ok','✓ Done! Notation slides downloaded.');
-  }catch(e){clearInterval(iv);setStatus('nStatus','err','⚠ '+e.message)}
-  finally{btn.disabled=false}
+  const fd=new FormData();fd.append('pdf',fi.files[0]);fd.append('lines_per_slide',document.getElementById('nLines').value);fd.append('dpi',document.getElementById('nDpi').value);
+  try{const res=await fetch('/api/notation',{method:'POST',body:fd});clearInterval(iv);if(!res.ok)throw new Error((await res.json()).error);dl(await res.blob(),'notation_slides.pptx');setStatus('nStatus','ok','\u2713 Done! Notation slides downloaded.')}
+  catch(e){clearInterval(iv);setStatus('nStatus','err','\u26A0 '+e.message)}finally{btn.disabled=false}
 }
-
-/* drag styling */
-['lDrop','nDrop'].forEach(id=>{
-  const el=document.getElementById(id);
-  el.addEventListener('dragover',e=>{e.preventDefault();el.classList.add('over')});
-  el.addEventListener('dragleave',()=>el.classList.remove('over'));
-  el.addEventListener('drop',e=>{e.preventDefault();el.classList.remove('over')});
-});
-
-/* ── Paste-to-upload (Ctrl+V / Cmd+V) ──────────────────────────
-   Works when the Lyric or Notation panel is active.
-   Reads the first file/image item from the clipboard.
-────────────────────────────────────────────────────────────────*/
-document.addEventListener('paste', e => {
-  const active = document.querySelector('.panel.active');
-  if (!active) return;
-  const items = e.clipboardData && e.clipboardData.items;
-  if (!items) return;
-
-  for (const item of items) {
-    // Accept any file — PDF, PNG, JPG
-    if (item.kind !== 'file') continue;
-    const file = item.getAsFile();
-    if (!file) continue;
-
-    const name = file.name || ('pasted_file.' + (file.type.split('/')[1] || 'png'));
-    const isLyric    = active.id === 'panel-lyric';
-    const isNotation = active.id === 'panel-notation';
-
-    if (isLyric) {
-      // Inject file into the lyric file input via a DataTransfer trick
-      const dt = new DataTransfer();
-      dt.items.add(new File([file], name, {type: file.type}));
-      document.getElementById('lFile').files = dt.files;
-      document.getElementById('lName').textContent = name;
-      document.getElementById('lPill').classList.add('on');
-      setStatus('lExtStatus','ok','📋 File pasted! Click "Extract Lyrics" to run OCR.');
-      e.preventDefault();
-      break;
-    }
-    if (isNotation) {
-      const dt = new DataTransfer();
-      dt.items.add(new File([file], name, {type: file.type}));
-      document.getElementById('nFile').files = dt.files;
-      document.getElementById('nName').textContent = name;
-      document.getElementById('nPill').classList.add('on');
-      setStatus('nStatus','ok','📋 File pasted! Click "Generate Notation Slides".');
-      e.preventDefault();
-      break;
-    }
+['lDrop','nDrop'].forEach(id=>{const el=document.getElementById(id);el.addEventListener('dragover',e=>{e.preventDefault();el.classList.add('over')});el.addEventListener('dragleave',()=>el.classList.remove('over'));el.addEventListener('drop',e=>{e.preventDefault();el.classList.remove('over')})});
+document.addEventListener('paste',e=>{
+  const active=document.querySelector('.panel.active');if(!active)return;
+  const items=e.clipboardData&&e.clipboardData.items;if(!items)return;
+  for(const item of items){
+    if(item.kind!=='file')continue;const file=item.getAsFile();if(!file)continue;
+    const name=file.name||('pasted_file.'+(file.type.split('/')[1]||'png'));
+    const isLyric=active.id==='panel-lyric',isNotation=active.id==='panel-notation';
+    if(isLyric){const dt=new DataTransfer();dt.items.add(new File([file],name,{type:file.type}));document.getElementById('lFile').files=dt.files;document.getElementById('lName').textContent=name;document.getElementById('lPill').classList.add('on');setStatus('lExtStatus','ok','\uD83D\uDCCB Pasted! Click Extract Lyrics to run OCR.');e.preventDefault();break}
+    if(isNotation){const dt=new DataTransfer();dt.items.add(new File([file],name,{type:file.type}));document.getElementById('nFile').files=dt.files;document.getElementById('nName').textContent=name;document.getElementById('nPill').classList.add('on');setStatus('nStatus','ok','\uD83D\uDCCB Pasted! Click Generate Notation Slides.');e.preventDefault();break}
   }
 });
-
-/* init */
 renderCarousel('b');renderCarousel('l');
 </script>
 </body>
