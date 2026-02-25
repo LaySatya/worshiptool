@@ -1,0 +1,6 @@
+flask
+pdf2image
+pillow
+python-pptx
+numpy
+pytesseract

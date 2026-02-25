@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Song Slide Generator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Khmer:wght@400;700&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink: #1a1209;
+      --paper: #faf7f2;
+      --accent: #b5490a;
+      --gold: #c9963a;
+      --muted: #8a7e6e;
+      --border: #ddd5c4;
+      --success: #2d6a4f;
+    }
+
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 1rem 4rem;
+    }
+
+    /* Decorative staff lines header */
+    .header-bg {
+      width: 100%;
+      background: var(--ink);
+      position: relative;
+      overflow: hidden;
+      padding: 2.5rem 1rem 2rem;
+      margin-bottom: 3rem;
+      text-align: center;
+    }
+
+    .staff-lines {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+    }
+
+    .staff-lines line {
+      stroke: rgba(255,255,255,0.08);
+      stroke-width: 1;
+    }
+
+    .header-bg h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.8rem, 4vw, 3rem);
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: -0.01em;
+      position: relative;
+      z-index: 1;
+    }
+
+    .header-bg h1 span {
+      color: var(--gold);
+    }
+
+    .header-bg p {
+      color: rgba(255,255,255,0.55);
+      font-size: 0.95rem;
+      margin-top: 0.5rem;
+      font-weight: 300;
+      position: relative;
+      z-index: 1;
+      font-family: 'Noto Serif Khmer', serif;
+    }
+
+    /* Treble clef decoration */
+    .clef-deco {
+      position: absolute;
+      left: 5%;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 5rem;
+      opacity: 0.12;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .clef-deco-right {
+      left: auto;
+      right: 5%;
+      opacity: 0.07;
+      font-size: 7rem;
+    }
+
+    /* Main card */
+    .card {
+      background: #fff;
+      border: 1.5px solid var(--border);
+      border-radius: 2px;
+      padding: 2.5rem 2.5rem 2rem;
+      width: 100%;
+      max-width: 560px;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.06);
+    }
+
+    .card-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 1.8rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .card-title::before {
+      content: '♩';
+      color: var(--gold);
+      font-size: 1.3rem;
+    }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 2px;
+      padding: 2.5rem 1rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+      background: var(--paper);
+      margin-bottom: 1.8rem;
+    }
+
+    .upload-zone:hover, .upload-zone.dragging {
+      border-color: var(--accent);
+      background: #fff5f0;
+    }
+
+    .upload-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .upload-icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.8rem;
+      display: block;
+      color: var(--muted);
+    }
+
+    .upload-zone .label {
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    .upload-zone .sublabel {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-top: 0.3rem;
+    }
+
+    .file-chosen {
+      display: none;
+      align-items: center;
+      gap: 0.7rem;
+      background: #f0faf5;
+      border: 1px solid #a8d5bc;
+      border-radius: 2px;
+      padding: 0.7rem 1rem;
+      margin-top: 0.8rem;
+      font-size: 0.88rem;
+      color: var(--success);
+    }
+
+    .file-chosen.show { display: flex; }
+
+    /* Settings row */
+    .settings {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.8rem;
+    }
+
+    .field label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+
+    .field select, .field input[type="range"] {
+      width: 100%;
+    }
+
+    .field select {
+      appearance: none;
+      background: var(--paper) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7e6e'/%3E%3C/svg%3E") no-repeat right 0.8rem center;
+      border: 1.5px solid var(--border);
+      border-radius: 2px;
+      padding: 0.55rem 2rem 0.55rem 0.8rem;
+      font-size: 0.9rem;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .field select:focus { outline: none; border-color: var(--accent); }
+
+    .range-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    input[type="range"] {
+      accent-color: var(--accent);
+      flex: 1;
+    }
+
+    .range-val {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--ink);
+      min-width: 2.5rem;
+      text-align: right;
+    }
+
+    /* Submit button */
+    button[type="submit"] {
+      width: 100%;
+      background: var(--ink);
+      color: #fff;
+      border: none;
+      border-radius: 2px;
+      padding: 0.9rem;
+      font-family: 'Playfair Display', serif;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    button[type="submit"]:hover { background: var(--accent); }
+    button[type="submit"]:disabled { background: var(--muted); cursor: not-allowed; }
+
+    /* Progress / status */
+    .status {
+      display: none;
+      text-align: center;
+      padding: 1.2rem 0 0;
+    }
+
+    .status.show { display: block; }
+
+    .spinner {
+      display: inline-block;
+      width: 1.4rem;
+      height: 1.4rem;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.5rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status-text {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .error-msg {
+      display: none;
+      color: #c0392b;
+      background: #fff5f5;
+      border: 1px solid #f5c6cb;
+      border-radius: 2px;
+      padding: 0.7rem 1rem;
+      font-size: 0.88rem;
+      margin-top: 0.8rem;
+    }
+
+    .error-msg.show { display: block; }
+
+    /* Info section */
+    .info-box {
+      margin-top: 2rem;
+      max-width: 560px;
+      width: 100%;
+    }
+
+    .info-box h3 {
+      font-family: 'Playfair Display', serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--muted);
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.9rem;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .step-num {
+      background: var(--ink);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      width: 1.4rem;
+      height: 1.4rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 0.05rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-bg">
+    <svg class="staff-lines" preserveAspectRatio="none" viewBox="0 0 1200 140" xmlns="http://www.w3.org/2000/svg">
+      <line x1="0" y1="25" x2="1200" y2="25"/>
+      <line x1="0" y1="45" x2="1200" y2="45"/>
+      <line x1="0" y1="65" x2="1200" y2="65"/>
+      <line x1="0" y1="85" x2="1200" y2="85"/>
+      <line x1="0" y1="105" x2="1200" y2="105"/>
+    </svg>
+    <div class="clef-deco">𝄞</div>
+    <div class="clef-deco clef-deco-right">♪</div>
+    <h1>Song <span>Slide</span> Generator</h1>
+    <p>បំប្លែង PDF ចម្រៀង ទៅជា PowerPoint slides</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Upload Your Song PDF</div>
+
+    <form id="uploadForm" method="post" enctype="multipart/form-data">
+      <div class="upload-zone" id="dropZone">
+        <input type="file" name="pdf" id="pdfInput" accept=".pdf" required>
+        <span class="upload-icon">𝄞</span>
+        <div class="label">Drop PDF here or click to browse</div>
+        <div class="sublabel">Music notation + Khmer lyrics PDF</div>
+      </div>
+
+      <div class="file-chosen" id="fileChosen">
+        <span>✓</span>
+        <span id="fileName"></span>
+      </div>
+
+      <div class="settings">
+        <div class="field">
+          <label>Lines per Slide</label>
+          <select name="lines_per_slide" id="linesPerSlide">
+            <option value="1">1 line — one phrase, big &amp; bold</option>
+            <option value="2" selected>2 lines — two phrases per slide</option>
+            <option value="3">3 lines — three phrases per slide</option>
+            <option value="4">4 lines — four phrases per slide</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Quality (DPI)</label>
+          <div class="range-wrapper">
+            <input type="range" name="dpi" id="dpiRange" min="150" max="300" step="50" value="200">
+            <span class="range-val" id="dpiVal">200</span>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn">
+        <span>♪</span> Generate Slides
+      </button>
+
+      <div class="status" id="status">
+        <span class="spinner"></span>
+        <span class="status-text" id="statusText">Converting PDF to images…</span>
+      </div>
+
+      <div class="error-msg" id="errorMsg"></div>
+    </form>
+  </div>
+
+  <div class="info-box">
+    <h3>How It Works</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <span>Upload your scanned song PDF (notation + Khmer lyrics)</span>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <span>App detects each staff row and pairs it with its Khmer lyric line below</span>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <span>Lines are grouped per your setting and scaled up to fill the slide — notation &amp; lyrics appear large and readable</span>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <span>Download your .pptx file — ready for church projection</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('uploadForm');
+    const input = document.getElementById('pdfInput');
+    const dropZone = document.getElementById('dropZone');
+    const fileChosen = document.getElementById('fileChosen');
+    const fileName = document.getElementById('fileName');
+    const submitBtn = document.getElementById('submitBtn');
+    const status = document.getElementById('status');
+    const statusText = document.getElementById('statusText');
+    const errorMsg = document.getElementById('errorMsg');
+    const dpiRange = document.getElementById('dpiRange');
+    const dpiVal = document.getElementById('dpiVal');
+
+    dpiRange.addEventListener('input', () => {
+      dpiVal.textContent = dpiRange.value;
+    });
+
+    input.addEventListener('change', () => {
+      if (input.files[0]) {
+        fileName.textContent = input.files[0].name;
+        fileChosen.classList.add('show');
+      }
+    });
+
+    // Drag and drop
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragging'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragging');
+      if (e.dataTransfer.files[0]) {
+        input.files = e.dataTransfer.files;
+        fileName.textContent = e.dataTransfer.files[0].name;
+        fileChosen.classList.add('show');
+      }
+    });
+
+    const messages = [
+      'Converting PDF to images…',
+      'Detecting music blocks…',
+      'Cropping notation sections…',
+      'Building PowerPoint slides…',
+      'Finalizing…'
+    ];
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorMsg.classList.remove('show');
+      status.classList.add('show');
+      submitBtn.disabled = true;
+
+      let msgIndex = 0;
+      statusText.textContent = messages[0];
+      const interval = setInterval(() => {
+        msgIndex = (msgIndex + 1) % messages.length;
+        statusText.textContent = messages[msgIndex];
+      }, 2000);
+
+      try {
+        const formData = new FormData(form);
+        const response = await fetch('/upload', { method: 'POST', body: formData });
+
+        clearInterval(interval);
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Conversion failed');
+        }
+
+        // Trigger download
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'song_slides.pptx';
+        a.click();
+        URL.revokeObjectURL(url);
+
+        statusText.textContent = '✓ Done! Downloading your slides…';
+      } catch (err) {
+        clearInterval(interval);
+        status.classList.remove('show');
+        errorMsg.textContent = '⚠ Error: ' + err.message;
+        errorMsg.classList.add('show');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
