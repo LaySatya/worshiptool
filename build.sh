@@ -5,11 +5,10 @@
 #   2. Install Node.js if not present (needed to build the React frontend)
 #   3. Install Python dependencies
 #   4. Build the React/Vite frontend into frontend/dist/
+#   5. Smoke-test the Python app imports
 set -e
 
 # ── 1. System packages ───────────────────────────────────────────
-# On Render the build environment allows apt-get.
-# Skip silently if not available (e.g. Railway uses nixpacks instead).
 if command -v apt-get &>/dev/null; then
   echo "=== Installing system packages ==="
   apt-get update -qq
@@ -31,6 +30,7 @@ echo "Node: $(node --version)  npm: $(npm --version)"
 
 # ── 3. Python dependencies ───────────────────────────────────────
 echo "=== Installing Python dependencies ==="
+pip install --upgrade pip -q
 pip install -r requirements.txt
 
 # ── 4. Frontend build ────────────────────────────────────────────
@@ -39,5 +39,9 @@ cd frontend
 npm ci
 npm run build
 cd ..
+
+# ── 5. Smoke test ────────────────────────────────────────────────
+echo "=== Smoke-testing app import ==="
+python -c "import main; print('main.py imports OK')"
 
 echo "=== Build complete ==="

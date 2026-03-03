@@ -1218,22 +1218,30 @@ def song_generate(req: SongGenerateRequest):
 
 
 # ── Static frontend (Vite build) ─────────────────────────────────
-# Mount the built React app so a single Railway deployment serves everything.
-# The frontend is built into frontend/dist by `npm run build`.
+# Mount the built React app so a single deployment serves everything.
+# On Render: build.sh runs `npm run build` before gunicorn starts,
+# so frontend/dist exists by the time this code runs.
 _FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 
-if _FRONTEND_DIST.exists():
-    # Serve /assets/*, fonts, etc. directly
-    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
+def _setup_static() -> None:
+    """Mount static files only if the built frontend exists."""
+    if not _FRONTEND_DIST.exists():
+        return  # running locally without a build — API-only mode
+
+    assets_dir = _FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(assets_dir)),
+            name="assets",
+        )
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        """
-        Catch-all: serve index.html for any path not matched by an /api route.
-        This makes React Router (or plain SPA routing) work on page refresh.
-        """
-        # Try to serve a real file first (favicon.ico, fonts, etc.)
+        """Catch-all: serve index.html for any path not matched by /api routes."""
         candidate = _FRONTEND_DIST / full_path
         if candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(str(_FRONTEND_DIST / "index.html"))
+
+_setup_static()
