@@ -1,57 +1,67 @@
-# Song Slide Generator
-Convert Khmer worship song PDFs (notation + lyrics) into PowerPoint slides automatically.
+# ChurchTool — Khmer Worship Slide Generator
 
-## Setup
-
-### 1. Install Poppler (required for PDF conversion)
-**Mac:**
-```bash
-brew install poppler
-```
-**Ubuntu/Linux:**
-```bash
-sudo apt install poppler-utils
-```
-
-### 2. Create virtual environment
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Install Python packages
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Run the app
-```bash
-python3 app.py
-```
-
-Open your browser at: **http://127.0.0.1:5000**
+Convert Khmer worship song PDFs / scanned images into PowerPoint slides automatically.  
+Built with **FastAPI + React (Vite) + Tesseract OCR**.
 
 ---
 
-## How It Works
-1. Upload your scanned song PDF
-2. The app converts each page to a high-res image
-3. It scans for horizontal white-space gaps to find each music block
-4. Each block (notation staff + Khmer lyrics) becomes one slide
-5. Download the ready `.pptx` file
+## 🚀 Deploy to Railway (recommended)
 
-## Project Structure
+Railway handles Tesseract + Poppler system packages automatically via `railway.toml`.
+
+### One-time setup
+
+1. Push this repo to GitHub
+2. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**
+3. Select the repository — Railway will detect `railway.toml` and run `build.sh` automatically
+4. Once deployed, click **Generate Domain** to get your public URL
+
+That's it. The React frontend is built at deploy time and served by the same FastAPI process.
+
+---
+
+## 💻 Local development
+
+### Prerequisites
+```bash
+# macOS
+brew install tesseract tesseract-lang poppler
+
+# Ubuntu/Debian
+sudo apt install tesseract-ocr tesseract-ocr-khm poppler-utils
+```
+
+### Backend
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### Frontend (separate terminal)
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
+```
+
+The Vite dev server proxies `/api/*` to `localhost:8000` automatically.
+
+---
+
+## Project structure
 ```
 song_slide_app/
-├── app.py              ← Flask backend
-├── requirements.txt    ← Python dependencies
-├── templates/
-│   └── index.html      ← Upload UI
-├── uploads/            ← Temp PDF storage
-└── output/             ← Generated files
+├── main.py             ← FastAPI backend (Bible slides + Song OCR)
+├── requirements.txt    ← Python dependencies (pinned)
+├── Procfile            ← gunicorn start command
+├── railway.toml        ← Railway build + system package config
+├── build.sh            ← Build script (pip install + npm build)
+├── fonts/              ← Bundled Khmer OS fonts
+├── frontend/
+│   ├── src/            ← React + Vite source
+│   └── dist/           ← Built output (generated, not committed)
+├── output/             ← Generated PPTX files (local only)
+└── uploads/            ← Temp upload storage (local only)
 ```
-
-## Options
-- **Auto (Smart detect)** — detects white gaps between music systems
-- **Merge pairs** — merges adjacent small blocks together
-- **DPI** — higher = better quality but slower (200 is recommended)
