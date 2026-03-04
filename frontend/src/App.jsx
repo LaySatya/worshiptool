@@ -10,10 +10,12 @@ import {
   Layers,
   FileText,
   Music,
+  Merge,
 } from 'lucide-react'
 import SettingsPanel from './components/SettingsPanel.jsx'
 import PreviewPanel from './components/PreviewPanel.jsx'
 import SongSlidePage from './SongSlidePage.jsx'
+import MergeSlidesPage from './MergeSlidesPage.jsx'
 import { fetchPreview, generatePptx } from './api.js'
 import { DEFAULT_SETTINGS } from './constants.js'
 
@@ -57,7 +59,7 @@ Romans 8:28
 And we know that in all things God works for the good of those who love him.`
 
 export default function App() {
-  const [page, setPage]             = useState('bible')   // 'bible' | 'song'
+  const [page, setPage]             = useState('bible')   // 'bible' | 'song' | 'merge'
   const [rawText, setRawText]       = useState('')
   const [reference, setReference]   = useState('')
   const [perSlide, setPerSlide]     = useState(1)
@@ -122,7 +124,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className={`bg-slate-50 flex flex-col ${page === 'merge' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
 
       {/* Header */}
       <header className="bg-white border-b border-slate-100 sticky top-0 z-40">
@@ -154,6 +156,16 @@ export default function App() {
               >
                 <Music size={12} />
                 Song Slides
+              </button>
+              <button
+                onClick={() => setPage('merge')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all
+                  ${page === 'merge'
+                    ? 'bg-white text-brand-600 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Merge size={12} />
+                Merge Slides
               </button>
             </div>
           </div>
@@ -195,12 +207,21 @@ export default function App() {
           >
             <Music size={12} /> Song Slides
           </button>
+          <button
+            onClick={() => setPage('merge')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold border-b-2 transition
+              ${page === 'merge' ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-400'}`}
+          >
+            <Merge size={12} /> Merge
+          </button>
         </div>
       </header>
 
       {/* Page content */}
       {page === 'song' ? (
         <SongSlidePage />
+      ) : page === 'merge' ? (
+        <MergeSlidesPage />
       ) : (
         /* ── Bible Slides 3-column layout ── */
         <div className="flex-1 max-w-[1600px] mx-auto w-full px-4 py-5
