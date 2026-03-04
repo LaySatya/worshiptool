@@ -1217,6 +1217,132 @@ def song_generate(req: SongGenerateRequest):
     )
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  Merge Slides — combine multiple PPTX files into one
+# ═══════════════════════════════════════════════════════════════════
+
+def _copy_slide(source_prs: Presentation, source_slide, dest_prs: Presentation) -> None:
+    """
+    Deep-copy a slide from source_prs into dest_prs, preserving shapes,
+    background, and slide dimensions (destination dims must already be set).
+    """
+    # We copy the underlying XML element and append it to dest presentation
+    # then fix up any relationship references (images, fonts, etc.)
+    import copy
+    from pptx.opc.packuri import PackURI
+
+    dest_slide_layout = dest_prs.slide_layouts[6]  # blank layout
+    dest_slide = dest_prs.slides.add_slide(dest_slide_layout)
+
+    # Replace the spTree (shape tree) with the source's spTree
+    source_spTree = source_slide.shapes._spTree
+    dest_spTree   = dest_slide.shapes._spTree
+
+    # Remove all default shapes from the new blank slide
+    for child in list(dest_spTree):
+        dest_spTree.remove(child)
+
+    # Copy background
+    try:
+        src_bg = source_slide.background.fill
+        dst_bg = dest_slide.background.fill
+        if src_bg.type is not None:
+            # Solid fill
+            dst_bg.solid()
+            dst_bg.fore_color.rgb = src_bg.fore_color.rgb
+    except Exception:
+        pass  # skip if background copy fails — not critical
+
+    # Copy all shape XML nodes
+    for elem in source_spTree:
+        dest_spTree.append(copy.deepcopy(elem))
+
+    # Re-attach any embedded images / media from the source slide's part
+    for rel in source_slide.part.rels.values():
+        try:
+            if "image" in rel.reltype:
+                img_part = rel.target_part
+                new_rel = dest_slide.part.relate_to(img_part, rel.reltype)
+                # Patch rId references in the copied XML
+                for elem in dest_spTree.iter():
+                    for attr_name, attr_val in list(elem.attrib.items()):
+                        if attr_val == rel.rId:
+                            elem.set(attr_name, new_rel)
+        except Exception:
+            pass  # best-effort; non-image rels are skipped silently
+
+
+def merge_pptx_files(files_bytes: list[bytes]) -> bytes:
+    """
+    Merge a list of PPTX byte-strings into one PPTX.
+    Slide order follows the order of files_bytes.
+    Returns the merged PPTX as bytes.
+    """
+    if not files_bytes:
+        raise ValueError("No files provided")
+
+    # Open the first file as the base — inherit its dimensions
+    first_prs = Presentation(io.BytesIO(files_bytes[0]))
+    dest_prs  = Presentation()
+    dest_prs.slide_width  = first_prs.slide_width
+    dest_prs.slide_height = first_prs.slide_height
+
+    for pptx_bytes in files_bytes:
+        src_prs = Presentation(io.BytesIO(pptx_bytes))
+        for slide in src_prs.slides:
+            _copy_slide(src_prs, slide, dest_prs)
+
+    buf = io.BytesIO()
+    dest_prs.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+@app.post("/api/merge/count-slides")
+async def merge_count_slides(file: UploadFile = File(...)):
+    """Return the number of slides in an uploaded PPTX."""
+    ext = Path(file.filename or "").suffix.lower()
+    if ext != ".pptx":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Only .pptx files are supported.")
+    data = await file.read()
+    prs  = Presentation(io.BytesIO(data))
+    return {"slide_count": len(prs.slides), "filename": file.filename}
+
+
+@app.post("/api/merge/generate")
+async def merge_generate(
+    files: list[UploadFile] = File(...),
+    output_name: str = Form("merged_slides"),
+):
+    """
+    Accept multiple PPTX files, merge all their slides in order,
+    and return the combined PPTX as a download.
+    """
+    from fastapi import HTTPException
+
+    if len(files) < 2:
+        raise HTTPException(status_code=400, detail="Please upload at least 2 PPTX files.")
+
+    files_bytes: list[bytes] = []
+    for uf in files:
+        ext = Path(uf.filename or "").suffix.lower()
+        if ext != ".pptx":
+            raise HTTPException(status_code=400, detail=f"'{uf.filename}' is not a .pptx file.")
+        files_bytes.append(await uf.read())
+
+    merged = merge_pptx_files(files_bytes)
+
+    safe_name = re.sub(r'[^\w\-]', '_', output_name.strip()) or "merged_slides"
+    filename  = f"{safe_name}.pptx"
+
+    return StreamingResponse(
+        io.BytesIO(merged),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ── Static frontend (Vite build) ─────────────────────────────────
 # Mount the built React app so a single deployment serves everything.
 # On Render: build.sh runs `npm run build` before gunicorn starts,
