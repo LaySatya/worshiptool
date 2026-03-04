@@ -18,8 +18,48 @@ import {
   ArrowUp,
   ArrowDown,
   Image as ImageIcon,
+  RefreshCw,
+  RotateCcw,
 } from 'lucide-react'
 import { mergePptxFiles, previewSlides } from './api.js'
+
+const SESSION_KEY = 'mergeSlides_session'
+
+// ── Persist session to sessionStorage (thumbnails + metadata only) ─
+function saveSession(files, outputName, activeFileIdx) {
+  try {
+    const serialisable = files.map(e => ({
+      id:         e.id,
+      name:       e.file.name,
+      size:       e.file.size,
+      slideCount: e.slideCount,
+      thumbnails: e.thumbnails,   // base64 strings — safe to store
+      loading:    false,
+      needsReattach: true,        // File binary is gone on refresh
+    }))
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      files: serialisable,
+      outputName,
+      activeFileIdx,
+    }))
+  } catch {
+    // sessionStorage full (large thumbnails) — silently skip
+  }
+}
+
+function loadSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY)
+}
 
 // ── Toast ────────────────────────────────────────────────────────
 function Toast({ message, type = 'success', onClose }) {
@@ -117,33 +157,43 @@ function FileCard({ entry, index, total, onRemove, onMoveUp, onMoveDown, isActiv
     <div
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 shadow-sm cursor-pointer transition-all border
-        ${isActive
-          ? 'bg-brand-50 border-brand-300'
-          : 'bg-white border-slate-200 hover:border-brand-200'}`}
+        ${entry.needsReattach
+          ? 'bg-amber-50 border-amber-300'
+          : isActive
+            ? 'bg-brand-50 border-brand-300'
+            : 'bg-white border-slate-200 hover:border-brand-200'}`}
     >
       <GripVertical size={14} className="text-slate-300 shrink-0" />
 
       {/* mini thumbnail */}
-      <div className="w-12 rounded overflow-hidden border border-slate-200 bg-slate-800 shrink-0" style={{ aspectRatio: '16/9' }}>
+      <div className="w-12 rounded overflow-hidden border border-slate-200 bg-slate-100 shrink-0" style={{ aspectRatio: '16/9' }}>
         {entry.loading ? (
           <div className="w-full h-full flex items-center justify-center">
             <Loader2 size={10} className="text-slate-400 animate-spin" />
           </div>
         ) : firstThumb ? (
-          <img src={`data:image/png;base64,${firstThumb}`} className="w-full h-full object-cover" alt="" draggable={false} />
+          <img src={`data:image/png;base64,${firstThumb}`} className="w-full h-full" style={{ objectFit: 'fill' }} alt="" draggable={false} />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <FileSliders size={10} className="text-slate-500" />
+            <FileSliders size={10} className="text-slate-400" />
           </div>
         )}
       </div>
 
       <div className="flex-1 min-w-0">
         <p className="text-xs font-semibold text-slate-800 truncate">{entry.file.name}</p>
-        <p className="text-[10px] text-slate-400 mt-0.5">
-          {sizeKB} KB
-          {entry.slideCount != null && (
-            <span className="ml-1.5 text-brand-500 font-semibold">{entry.slideCount} slide{entry.slideCount !== 1 ? 's' : ''}</span>
+        <p className="text-[10px] mt-0.5 flex items-center gap-1.5">
+          {entry.needsReattach ? (
+            <span className="text-amber-600 font-semibold flex items-center gap-1">
+              <RotateCcw size={9} /> Needs re-attach
+            </span>
+          ) : (
+            <>
+              <span className="text-slate-400">{sizeKB} KB</span>
+              {entry.slideCount != null && (
+                <span className="text-brand-500 font-semibold">{entry.slideCount} slide{entry.slideCount !== 1 ? 's' : ''}</span>
+              )}
+            </>
           )}
         </p>
       </div>
@@ -282,14 +332,64 @@ function DropZone({ onFiles, disabled }) {
 
 // ── Main Page ─────────────────────────────────────────────────────
 export default function MergeSlidesPage() {
-  // entries: { id, file, slideCount, thumbnails: string[]|null, loading: bool }
+  // entries: { id, file, slideCount, thumbnails: string[]|null, loading: bool, needsReattach?: bool }
   const [files, setFiles]               = useState([])
   const [activeFileIdx, setActiveFileIdx]   = useState(0)
   const [activeSlideIdx, setActiveSlideIdx] = useState(0)
   const [merging, setMerging]           = useState(false)
   const [outputName, setOutputName]     = useState('merged_slides')
   const [toast, setToast]               = useState(null)
+  const [restoredSession, setRestoredSession] = useState(false)
   const stripRef = useRef(null)
+
+  // ── Restore session on mount ────────────────────────────────
+  useEffect(() => {
+    const session = loadSession()
+    if (!session || !session.files?.length) return
+    // Rebuild stub entries (no File object — user must re-attach)
+    const restored = session.files.map(s => ({
+      id:          s.id,
+      file:        { name: s.name, size: s.size },   // stub — no binary
+      slideCount:  s.slideCount,
+      thumbnails:  s.thumbnails,
+      loading:     false,
+      needsReattach: true,
+    }))
+    setFiles(restored)
+    setOutputName(session.outputName ?? 'merged_slides')
+    setActiveFileIdx(session.activeFileIdx ?? 0)
+    setRestoredSession(true)
+  }, [])
+
+  // ── Warn before unload if files are loaded ──────────────────
+  useEffect(() => {
+    const handler = e => {
+      if (files.length === 0) return
+      e.preventDefault()
+      e.returnValue = ''   // triggers browser "Leave site?" dialog
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [files.length])
+
+  // ── Persist session whenever state changes ──────────────────
+  useEffect(() => {
+    // Only save entries that have a real File object (not stubs)
+    const saveable = files.filter(e => e.file instanceof File)
+    if (saveable.length === 0 && files.length === 0) {
+      clearSession()
+      return
+    }
+    saveSession(
+      files.map(e => ({
+        ...e,
+        // If it's a stub (restored), keep existing thumbnails/metadata as-is
+        file: e.file instanceof File ? e.file : { name: e.file.name, size: e.file.size },
+      })),
+      outputName,
+      activeFileIdx,
+    )
+  }, [files, outputName, activeFileIdx])
 
   const totalSlides = files.reduce((s, f) => s + (f.slideCount ?? 0), 0)
 
@@ -337,12 +437,50 @@ export default function MergeSlidesPage() {
 
   // ── Add files + auto-fetch thumbnails ────────────────────────
   const addFiles = useCallback(newFiles => {
-    const entries = newFiles.map(f => ({
+    // Check if any of the new files match a stub that needs re-attaching
+    const reattaching = []
+    const brandNew = []
+
+    newFiles.forEach(f => {
+      const stubIdx = files.findIndex(
+        e => e.needsReattach && e.file.name === f.name && e.file.size === f.size
+      )
+      if (stubIdx >= 0) {
+        reattaching.push({ file: f, stubIdx })
+      } else {
+        brandNew.push(f)
+      }
+    })
+
+    // Replace stubs with real File objects (keep thumbnails, no re-fetch needed)
+    if (reattaching.length > 0) {
+      setFiles(prev => {
+        const arr = [...prev]
+        reattaching.forEach(({ file, stubIdx }) => {
+          arr[stubIdx] = { ...arr[stubIdx], file, needsReattach: false }
+        })
+        return arr
+      })
+      if (reattaching.length > 0 && brandNew.length === 0) {
+        const allDone = files.every((e, i) =>
+          !e.needsReattach || reattaching.some(r => r.stubIdx === i)
+        )
+        if (allDone || files.filter(e => e.needsReattach).length === reattaching.length) {
+          setRestoredSession(false)
+          setToast({ message: `${reattaching.length} file${reattaching.length > 1 ? 's' : ''} re-attached successfully!`, type: 'success' })
+        }
+      }
+    }
+
+    if (brandNew.length === 0) return
+
+    const entries = brandNew.map(f => ({
       id: crypto.randomUUID(),
       file: f,
       slideCount: null,
       thumbnails: null,
       loading: true,
+      needsReattach: false,
     }))
 
     setFiles(prev => {
@@ -378,12 +516,24 @@ export default function MergeSlidesPage() {
         }
       }
     })
-  }, [])
+  }, [files])
 
   const removeFile = idx => {
-    setFiles(prev => prev.filter((_, i) => i !== idx))
+    setFiles(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      if (next.length === 0) clearSession()
+      return next
+    })
     setActiveFileIdx(i => Math.max(0, Math.min(i, files.length - 2)))
     setActiveSlideIdx(0)
+  }
+
+  const clearAll = () => {
+    setFiles([])
+    setActiveFileIdx(0)
+    setActiveSlideIdx(0)
+    setRestoredSession(false)
+    clearSession()
   }
 
   const moveFile = (idx, dir) => {
@@ -397,9 +547,15 @@ export default function MergeSlidesPage() {
   }
 
   // ── Merge & download ─────────────────────────────────────────
+  const needsReattach = files.some(e => e.needsReattach)
+
   const handleMerge = async () => {
     if (files.length < 2) {
       setToast({ message: 'Add at least 2 PPTX files to merge.', type: 'error' })
+      return
+    }
+    if (needsReattach) {
+      setToast({ message: 'Re-attach the highlighted files before merging.', type: 'error' })
       return
     }
     setMerging(true)
@@ -421,6 +577,29 @@ export default function MergeSlidesPage() {
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+
+      {/* ── Session restore banner ─────────────────────────────── */}
+      {restoredSession && (
+        <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-800 text-xs">
+          <RotateCcw size={13} className="shrink-0 text-amber-500" />
+          <span className="flex-1">
+            <strong>Session restored.</strong> Your file list and previews are back — but the file contents were cleared by the browser refresh.
+            {' '}<strong>Re-attach the same files</strong> (highlighted in orange) to enable merging.
+          </span>
+          <label className="flex items-center gap-1.5 font-semibold cursor-pointer bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg px-2.5 py-1 transition shrink-0">
+            <RefreshCw size={11} />
+            Re-attach files
+            <input type="file" accept=".pptx" multiple className="hidden"
+              onChange={e => {
+                addFiles(Array.from(e.target.files ?? []).filter(f => f.name.toLowerCase().endsWith('.pptx')))
+                e.target.value = ''
+              }} />
+          </label>
+          <button onClick={() => setRestoredSession(false)} className="text-amber-400 hover:text-amber-700 transition shrink-0">
+            <X size={13} />
+          </button>
+        </div>
+      )}
       <div className="flex-1 min-h-0 max-w-[1500px] mx-auto w-full px-4 py-4
                       flex flex-col lg:flex-row gap-4 overflow-hidden">
 
@@ -468,7 +647,7 @@ export default function MergeSlidesPage() {
                     }} />
                   <Plus size={12} /> Add more
                 </label>
-                <button onClick={() => { setFiles([]); setActiveFileIdx(0); setActiveSlideIdx(0) }}
+                <button onClick={clearAll}
                   className="text-[11px] text-slate-400 hover:text-red-500 flex items-center gap-1 transition">
                   <Trash2 size={11} /> Clear all
                 </button>
@@ -486,13 +665,18 @@ export default function MergeSlidesPage() {
                 <span className="text-xs text-slate-400 font-mono shrink-0">.pptx</span>
               </div>
             </div>
-            <button onClick={handleMerge} disabled={files.length < 2 || merging} className="btn-primary w-full">
+            <button onClick={handleMerge} disabled={files.length < 2 || merging || needsReattach} className="btn-primary w-full">
               {merging
                 ? <><Loader2 size={14} className="animate-spin" />Merging…</>
                 : <><Download size={14} />Merge &amp; Download PPTX</>}
             </button>
             {files.length < 2 && (
               <p className="text-[11px] text-slate-400 text-center">Attach at least 2 PPTX files to merge.</p>
+            )}
+            {files.length >= 2 && needsReattach && (
+              <p className="text-[11px] text-amber-600 text-center flex items-center justify-center gap-1">
+                <RotateCcw size={10} /> Re-attach highlighted files to enable merging.
+              </p>
             )}
           </div>
         </div>
@@ -530,7 +714,7 @@ export default function MergeSlidesPage() {
                 <div className="flex-1 min-h-0 flex items-center justify-center overflow-hidden">
                   <div className="w-full h-full flex items-center justify-center">
                     {/* Inner box: 16:9 constrained to both width AND height */}
-                    <div className="relative w-full" style={{ aspectRatio: '16/9', maxHeight: '90%', maxWidth: '80%' }}>
+                    <div className="relative w-full" style={{ aspectRatio: '16/9', maxHeight: '90%', maxWidth: '90%' }}>
                       <SlideViewer
                         thumb={currentSlide?.thumb ?? null}
                         label={currentSlide?.label ?? ''}
