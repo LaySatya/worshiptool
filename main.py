@@ -1225,7 +1225,13 @@ _FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 
 def _setup_static() -> None:
     """Mount static files only if the built frontend exists."""
+    import sys
+    print(f"[static] __file__      = {__file__}", file=sys.stderr)
+    print(f"[static] _FRONTEND_DIST = {_FRONTEND_DIST}", file=sys.stderr)
+    print(f"[static] dist exists   = {_FRONTEND_DIST.exists()}", file=sys.stderr)
+
     if not _FRONTEND_DIST.exists():
+        print("[static] No frontend/dist — running in API-only mode", file=sys.stderr)
         return  # running locally without a build — API-only mode
 
     assets_dir = _FRONTEND_DIST / "assets"
@@ -1235,6 +1241,7 @@ def _setup_static() -> None:
             StaticFiles(directory=str(assets_dir)),
             name="assets",
         )
+        print(f"[static] Mounted /assets -> {assets_dir}", file=sys.stderr)
 
     # SPA catch-all — must be defined at module level (not inside a conditional)
     # so gunicorn workers inherit it correctly after fork.

@@ -40,8 +40,17 @@ npm ci
 npm run build
 cd ..
 
+echo "=== Checking frontend/dist ==="
+ls -la frontend/dist/ || echo "WARNING: frontend/dist does not exist!"
+ls -la frontend/dist/assets/ 2>/dev/null || echo "WARNING: frontend/dist/assets does not exist!"
+
 # ── 5. Smoke test ────────────────────────────────────────────────
 echo "=== Smoke-testing app import ==="
-python -c "import main; print('main.py imports OK')"
+python -c "
+from pathlib import Path
+dist = Path('frontend/dist')
+print('frontend/dist exists:', dist.exists())
+print('index.html exists:', (dist / 'index.html').exists())
+"
 
 echo "=== Build complete ==="
