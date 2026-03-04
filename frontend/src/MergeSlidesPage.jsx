@@ -78,8 +78,7 @@ function SlideThumbnail({ thumb, label, active, onClick, loading }) {
 function SlideViewer({ thumb, label, loading }) {
   return (
     <div
-      className="relative w-full rounded-xl overflow-hidden border border-slate-200 shadow select-none bg-white"
-      style={{ aspectRatio: '16/9' }}
+      className="relative w-full h-full rounded-xl overflow-hidden border border-slate-200 shadow select-none bg-white"
     >
       {loading ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-50">
@@ -421,214 +420,227 @@ export default function MergeSlidesPage() {
   }
 
   return (
-    <div className="flex-1 max-w-[1500px] mx-auto w-full px-4 py-5
-                    grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 items-start">
+    <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+      <div className="flex-1 min-h-0 max-w-[1500px] mx-auto w-full px-4 py-4
+                      flex flex-col lg:flex-row gap-4 overflow-hidden">
 
-      {/* ══════════════════ LEFT PANEL ══════════════════ */}
-      <div className="space-y-4 lg:sticky lg:top-20">
-        <div className="card p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Merge size={14} className="text-brand-500" />
-            <h2 className="font-semibold text-sm text-slate-800">Attach PPTX Files</h2>
-          </div>
-          <DropZone onFiles={addFiles} disabled={merging} />
-        </div>
+        {/* ══════════════════ LEFT PANEL — scrollable ══════════════════ */}
+        <div className="w-full lg:w-[300px] xl:w-[320px] shrink-0 flex flex-col gap-3 overflow-y-auto overflow-x-hidden min-h-0 pb-2"
+             style={{ scrollbarWidth: 'thin' }}>
 
-        {files.length > 0 && (
-          <div className="card p-4 space-y-2">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Files — merge order</h3>
-              <span className="text-[11px] font-semibold text-brand-600 bg-brand-50 border border-brand-100 px-2 py-0.5 rounded-full">
-                {files.length} file{files.length !== 1 ? 's' : ''}{totalSlides > 0 && ` · ${totalSlides} slides`}
-              </span>
+          <div className="card p-4 space-y-3 shrink-0">
+            <div className="flex items-center gap-2">
+              <Merge size={14} className="text-brand-500" />
+              <h2 className="font-semibold text-sm text-slate-800">Attach PPTX Files</h2>
             </div>
-            <div className="space-y-1.5 max-h-[46vh] overflow-y-auto pr-0.5">
-              {files.map((entry, idx) => (
-                <FileCard
-                  key={entry.id}
-                  entry={entry}
-                  index={idx}
-                  total={files.length}
-                  isActive={idx === activeFileIdx}
-                  onClick={() => selectFile(idx)}
-                  onRemove={() => removeFile(idx)}
-                  onMoveUp={() => moveFile(idx, -1)}
-                  onMoveDown={() => moveFile(idx, 1)}
-                />
-              ))}
-            </div>
-            <div className="flex items-center justify-between pt-1">
-              <label className="flex items-center gap-1.5 text-xs text-brand-600 font-semibold cursor-pointer hover:text-brand-700 transition">
-                <input type="file" accept=".pptx" multiple className="hidden"
-                  onChange={e => {
-                    addFiles(Array.from(e.target.files ?? []).filter(f => f.name.toLowerCase().endsWith('.pptx')))
-                    e.target.value = ''
-                  }} />
-                <Plus size={12} /> Add more
-              </label>
-              <button onClick={() => { setFiles([]); setActiveFileIdx(0); setActiveSlideIdx(0) }}
-                className="text-[11px] text-slate-400 hover:text-red-500 flex items-center gap-1 transition">
-                <Trash2 size={11} /> Clear all
-              </button>
-            </div>
+            <DropZone onFiles={addFiles} disabled={merging} />
           </div>
-        )}
 
-        <div className="card p-4 space-y-3">
-          <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Output</h3>
-          <div>
-            <label className="label">File Name</label>
-            <div className="flex gap-2 items-center">
-              <input type="text" className="input flex-1" placeholder="merged_slides"
-                value={outputName} onChange={e => setOutputName(e.target.value)} />
-              <span className="text-xs text-slate-400 font-mono shrink-0">.pptx</span>
+          {files.length > 0 && (
+            <div className="card p-4 space-y-2 shrink-0">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Files — merge order</h3>
+                <span className="text-[11px] font-semibold text-brand-600 bg-brand-50 border border-brand-100 px-2 py-0.5 rounded-full">
+                  {files.length} file{files.length !== 1 ? 's' : ''}{totalSlides > 0 && ` · ${totalSlides} slides`}
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {files.map((entry, idx) => (
+                  <FileCard
+                    key={entry.id}
+                    entry={entry}
+                    index={idx}
+                    total={files.length}
+                    isActive={idx === activeFileIdx}
+                    onClick={() => selectFile(idx)}
+                    onRemove={() => removeFile(idx)}
+                    onMoveUp={() => moveFile(idx, -1)}
+                    onMoveDown={() => moveFile(idx, 1)}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <label className="flex items-center gap-1.5 text-xs text-brand-600 font-semibold cursor-pointer hover:text-brand-700 transition">
+                  <input type="file" accept=".pptx" multiple className="hidden"
+                    onChange={e => {
+                      addFiles(Array.from(e.target.files ?? []).filter(f => f.name.toLowerCase().endsWith('.pptx')))
+                      e.target.value = ''
+                    }} />
+                  <Plus size={12} /> Add more
+                </label>
+                <button onClick={() => { setFiles([]); setActiveFileIdx(0); setActiveSlideIdx(0) }}
+                  className="text-[11px] text-slate-400 hover:text-red-500 flex items-center gap-1 transition">
+                  <Trash2 size={11} /> Clear all
+                </button>
+              </div>
             </div>
-          </div>
-          <button onClick={handleMerge} disabled={files.length < 2 || merging} className="btn-primary w-full">
-            {merging
-              ? <><Loader2 size={14} className="animate-spin" />Merging…</>
-              : <><Download size={14} />Merge &amp; Download PPTX</>}
-          </button>
-          {files.length < 2 && (
-            <p className="text-[11px] text-slate-400 text-center">Attach at least 2 PPTX files to merge.</p>
           )}
-        </div>
-      </div>
 
-      {/* ══════════════════ RIGHT PANEL ══════════════════ */}
-      <div className="space-y-4">
-        {files.length === 0 ? (
-          <div className="card p-6">
-            <div className="w-full rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 bg-slate-50" style={{ minHeight: 360 }}>
-              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
-                <Layers size={28} className="text-slate-300" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-slate-500">No files attached yet</p>
-                <p className="text-xs text-slate-400 mt-1">Upload PPTX files — each slide will be previewed here exactly as it looks</p>
+          <div className="card p-4 space-y-3 shrink-0">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Output</h3>
+            <div>
+              <label className="label">File Name</label>
+              <div className="flex gap-2 items-center">
+                <input type="text" className="input flex-1" placeholder="merged_slides"
+                  value={outputName} onChange={e => setOutputName(e.target.value)} />
+                <span className="text-xs text-slate-400 font-mono shrink-0">.pptx</span>
               </div>
             </div>
+            <button onClick={handleMerge} disabled={files.length < 2 || merging} className="btn-primary w-full">
+              {merging
+                ? <><Loader2 size={14} className="animate-spin" />Merging…</>
+                : <><Download size={14} />Merge &amp; Download PPTX</>}
+            </button>
+            {files.length < 2 && (
+              <p className="text-[11px] text-slate-400 text-center">Attach at least 2 PPTX files to merge.</p>
+            )}
           </div>
-        ) : (
-          <>
-            {/* Large slide viewer */}
-            <div className="card p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Eye size={14} className="text-brand-500" />
-                <span className="font-semibold text-sm text-slate-700">Slide Preview</span>
-                {allSlides.length > 0 && (
-                  <span className="ml-auto text-xs font-semibold tabular-nums px-2.5 py-1 rounded-lg bg-brand-50 text-brand-600 border border-brand-100">
-                    {Math.max(1, globalIdx + 1)} / {allSlides.length}
-                  </span>
+        </div>
+
+        {/* ══════════════════ RIGHT PANEL — flex column, no overflow ══════════════════ */}
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-3 overflow-hidden">
+          {files.length === 0 ? (
+            <div className="card flex-1 p-6 flex items-center justify-center">
+              <div className="w-full rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-4 bg-slate-50 h-full">
+                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+                  <Layers size={28} className="text-slate-300" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-slate-500">No files attached yet</p>
+                  <p className="text-xs text-slate-400 mt-1">Upload PPTX files — each slide will be previewed here</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* ── Slide viewer card — takes all remaining vertical space ── */}
+              <div className="card p-3 flex flex-col gap-2 min-h-0 flex-1">
+                {/* Header */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <Eye size={14} className="text-brand-500" />
+                  <span className="font-semibold text-sm text-slate-700">Slide Preview</span>
+                  {allSlides.length > 0 && (
+                    <span className="ml-auto text-xs font-semibold tabular-nums px-2.5 py-1 rounded-lg bg-brand-50 text-brand-600 border border-brand-100">
+                      {Math.max(1, globalIdx + 1)} / {allSlides.length}
+                    </span>
+                  )}
+                </div>
+
+                {/* Viewer — fills remaining height, maintains 16:9 with max-width */}
+                <div className="flex-1 min-h-0 flex items-center justify-center overflow-hidden">
+                  <div className="w-full h-full flex items-center justify-center">
+                    {/* Inner box: 16:9 constrained to both width AND height */}
+                    <div className="relative w-full" style={{ aspectRatio: '16/9', maxHeight: '90%', maxWidth: '100%' }}>
+                      <SlideViewer
+                        thumb={currentSlide?.thumb ?? null}
+                        label={currentSlide?.label ?? ''}
+                        loading={currentSlide?.loading ?? false}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Prev / Next */}
+                {allSlides.length > 1 && (
+                  <div className="flex items-center justify-center gap-3 shrink-0">
+                    <button onClick={() => goTo(Math.max(0, globalIdx - 1))} disabled={globalIdx <= 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-600 disabled:opacity-30 transition">
+                      <ChevronLeft size={13} /> Prev
+                    </button>
+                    <span className="text-xs text-slate-400 tabular-nums">{Math.max(1, globalIdx + 1)} / {allSlides.length}</span>
+                    <button onClick={() => goTo(Math.min(allSlides.length - 1, globalIdx + 1))} disabled={globalIdx >= allSlides.length - 1}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-600 disabled:opacity-30 transition">
+                      Next <ChevronRight size={13} />
+                    </button>
+                  </div>
                 )}
               </div>
 
-              <SlideViewer
-                thumb={currentSlide?.thumb ?? null}
-                label={currentSlide?.label ?? ''}
-                loading={currentSlide?.loading ?? false}
-              />
+              {/* ── All-slides strip card — fixed height at bottom ── */}
+              <div className="card p-3 shrink-0 space-y-2">
+                {/* File tabs */}
+                <ScrollStrip>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 self-center shrink-0 mr-1 whitespace-nowrap">All slides</span>
+                  {files.map((entry, fi) => (
+                    <button key={entry.id} onClick={() => selectFile(fi)}
+                      className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all
+                        ${fi === activeFileIdx
+                          ? 'bg-brand-500 text-white border-brand-500 shadow'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300 hover:text-brand-600'}`}>
+                      <span className="opacity-70">#{fi + 1}</span>
+                      <span className="max-w-[120px] truncate">{entry.file.name.replace(/\.pptx$/i, '')}</span>
+                      {entry.slideCount != null && (
+                        <span className={`text-[9px] rounded px-1 ${fi === activeFileIdx ? 'bg-white/20' : 'bg-slate-100 text-slate-400'}`}>
+                          {entry.slideCount}s
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </ScrollStrip>
 
-              {allSlides.length > 1 && (
-                <div className="flex items-center justify-center gap-3">
-                  <button onClick={() => goTo(Math.max(0, globalIdx - 1))} disabled={globalIdx <= 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-600 disabled:opacity-30 transition">
-                    <ChevronLeft size={13} /> Prev
-                  </button>
-                  <span className="text-xs text-slate-400 tabular-nums">{Math.max(1, globalIdx + 1)} / {allSlides.length}</span>
-                  <button onClick={() => goTo(Math.min(allSlides.length - 1, globalIdx + 1))} disabled={globalIdx >= allSlides.length - 1}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-600 disabled:opacity-30 transition">
-                    Next <ChevronRight size={13} />
-                  </button>
-                </div>
-              )}
-            </div>
+                {/* Per-file thumbnail strip */}
+                <ScrollStrip innerRef={stripRef}>
+                  {allSlides.map((slide, flatIdx) => {
+                    if (slide.fileIdx !== activeFileIdx) return null
+                    return (
+                      <SlideThumbnail
+                        key={`${slide.fileIdx}-${slide.slideIdx}`}
+                        thumb={slide.thumb}
+                        label={`${slide.slideIdx + 1}`}
+                        loading={slide.loading}
+                        active={slide.fileIdx === activeFileIdx && slide.slideIdx === activeSlideIdx}
+                        onClick={() => goTo(flatIdx)}
+                      />
+                    )
+                  })}
+                </ScrollStrip>
 
-            {/* All-slides strip */}
-            <div className="card p-4 space-y-3">
-              {/* File tabs — horizontal scroll if many files */}
-              <ScrollStrip className="pb-0">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 self-center shrink-0 mr-1">All slides</span>
-                {files.map((entry, fi) => (
-                  <button key={entry.id} onClick={() => selectFile(fi)}
-                    className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all
-                      ${fi === activeFileIdx
-                        ? 'bg-brand-500 text-white border-brand-500 shadow'
-                        : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300 hover:text-brand-600'}`}>
-                    <span className="opacity-60">#{fi + 1}</span>
-                    <span className="max-w-[120px] truncate">{entry.file.name.replace(/\.pptx$/i, '')}</span>
-                    {entry.slideCount != null && (
-                      <span className={`text-[9px] rounded px-1 ${fi === activeFileIdx ? 'bg-white/20' : 'bg-slate-100 text-slate-400'}`}>
-                        {entry.slideCount}s
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </ScrollStrip>
-
-              {/* Thumbnail strip for selected file */}
-              <ScrollStrip innerRef={stripRef}>
-                {allSlides.map((slide, flatIdx) => {
-                  if (slide.fileIdx !== activeFileIdx) return null
-                  return (
-                    <SlideThumbnail
-                      key={`${slide.fileIdx}-${slide.slideIdx}`}
-                      thumb={slide.thumb}
-                      label={`${slide.slideIdx + 1}`}
-                      loading={slide.loading}
-                      active={slide.fileIdx === activeFileIdx && slide.slideIdx === activeSlideIdx}
-                      onClick={() => goTo(flatIdx)}
-                    />
-                  )
-                })}
-              </ScrollStrip>
-
-              {/* Full merge order strip */}
-              {files.length >= 2 && (
-                <div className="border-t border-slate-100 pt-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                    Merge order — all {totalSlides} slides
-                  </p>
-                  <ScrollStrip>
-                    {allSlides.map((slide, flatIdx) => {
-                      const isActive = slide.fileIdx === activeFileIdx && slide.slideIdx === activeSlideIdx
-                      const colors = ['border-blue-300','border-purple-300','border-green-300','border-orange-300','border-pink-300','border-teal-300']
-                      const accent = colors[slide.fileIdx % colors.length]
-                      return (
-                        <button
-                          key={`all-${slide.fileIdx}-${slide.slideIdx}`}
-                          onClick={() => goTo(flatIdx)}
-                          title={slide.label}
-                          className={`relative flex-shrink-0 rounded overflow-hidden border-2 transition-all
-                            ${isActive ? 'border-brand-500 shadow scale-105' : `${accent} hover:border-brand-400`}`}
-                          style={{ width: 64, aspectRatio: '16/9' }}
-                        >
-                          {slide.loading ? (
-                            <div className="w-full h-full bg-slate-200 animate-pulse" />
-                          ) : slide.thumb ? (
-                            <img src={`data:image/png;base64,${slide.thumb}`} className="w-full h-full" style={{ objectFit: 'fill' }} alt="" draggable={false} />
-                          ) : (
-                            <div className="w-full h-full bg-slate-100" />
-                          )}
-                          <div className="absolute bottom-0 right-0 bg-black/50 text-white text-[8px] px-1 font-mono leading-tight">
-                            {flatIdx + 1}
-                          </div>
-                        </button>
-                      )
-                    })}
-                    {/* Result badge */}
-                    <div className="flex-shrink-0 flex flex-col items-center justify-center gap-0.5 bg-green-50 border-2 border-green-300 rounded px-2 text-green-700"
-                      style={{ minWidth: 72, aspectRatio: '16/9' }}>
-                      <CheckCircle2 size={12} />
-                      <span className="text-[8px] font-bold text-center leading-tight">{outputName || 'merged'}.pptx</span>
-                      <span className="text-[8px] opacity-70">{totalSlides}s</span>
-                    </div>
-                  </ScrollStrip>
-                </div>
-              )}
-            </div>
-          </>
-        )}
+                {/* Merge-order strip — only when 2+ files */}
+                {files.length >= 2 && (
+                  <div className="border-t border-slate-100 pt-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                      Merge order · {totalSlides} slides total
+                    </p>
+                    <ScrollStrip>
+                      {allSlides.map((slide, flatIdx) => {
+                        const isActive = slide.fileIdx === activeFileIdx && slide.slideIdx === activeSlideIdx
+                        const colors = ['border-blue-300','border-purple-300','border-green-300','border-orange-300','border-pink-300','border-teal-300']
+                        const accent = colors[slide.fileIdx % colors.length]
+                        return (
+                          <button
+                            key={`all-${slide.fileIdx}-${slide.slideIdx}`}
+                            onClick={() => goTo(flatIdx)}
+                            title={slide.label}
+                            className={`relative flex-shrink-0 rounded overflow-hidden border-2 transition-all
+                              ${isActive ? 'border-brand-500 shadow scale-105' : `${accent} hover:border-brand-400`}`}
+                            style={{ width: 60, aspectRatio: '16/9' }}
+                          >
+                            {slide.loading ? (
+                              <div className="w-full h-full bg-slate-200 animate-pulse" />
+                            ) : slide.thumb ? (
+                              <img src={`data:image/png;base64,${slide.thumb}`} className="w-full h-full" style={{ objectFit: 'fill' }} alt="" draggable={false} />
+                            ) : (
+                              <div className="w-full h-full bg-slate-100" />
+                            )}
+                            <div className="absolute bottom-0 right-0 bg-black/50 text-white text-[8px] px-0.5 font-mono leading-tight">
+                              {flatIdx + 1}
+                            </div>
+                          </button>
+                        )
+                      })}
+                      <div className="flex-shrink-0 flex flex-col items-center justify-center gap-0.5 bg-green-50 border-2 border-green-300 rounded px-2 text-green-700"
+                        style={{ minWidth: 64, aspectRatio: '16/9' }}>
+                        <CheckCircle2 size={10} />
+                        <span className="text-[8px] font-bold text-center leading-tight truncate max-w-[56px]">{outputName || 'merged'}.pptx</span>
+                        <span className="text-[8px] opacity-70">{totalSlides}s</span>
+                      </div>
+                    </ScrollStrip>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
