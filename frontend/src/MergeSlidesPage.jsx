@@ -530,7 +530,7 @@ export default function MergeSlidesPage() {
                 <div className="flex-1 min-h-0 flex items-center justify-center overflow-hidden">
                   <div className="w-full h-full flex items-center justify-center">
                     {/* Inner box: 16:9 constrained to both width AND height */}
-                    <div className="relative w-full" style={{ aspectRatio: '16/9', maxHeight: '90%', maxWidth: '100%' }}>
+                    <div className="relative w-full" style={{ aspectRatio: '16/9', maxHeight: '90%', maxWidth: '80%' }}>
                       <SlideViewer
                         thumb={currentSlide?.thumb ?? null}
                         label={currentSlide?.label ?? ''}
