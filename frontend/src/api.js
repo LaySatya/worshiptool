@@ -71,6 +71,19 @@ export async function countSlides(file) {
 }
 
 /**
+ * Render all slides of a PPTX as base64 PNG thumbnails.
+ * @param {File} file
+ * @returns {Promise<{filename, slide_count, thumbnails: string[]}>}
+ */
+export async function previewSlides(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/merge/preview-slides`, { method: 'POST', body: form })
+  if (!res.ok) throw new Error('Preview slides failed')
+  return res.json()
+}
+
+/**
  * Merge multiple PPTX files into one and return the blob.
  * @param {File[]} files - ordered list of PPTX files
  * @param {string} outputName - desired filename (without extension)

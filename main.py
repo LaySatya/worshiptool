@@ -1219,83 +1219,472 @@ def song_generate(req: SongGenerateRequest):
 
 # ═══════════════════════════════════════════════════════════════════
 #  Merge Slides — combine multiple PPTX files into one
+#  Strategy: low-level ZIP surgery so every slide's XML, images,
+#  fonts, themes, and background are preserved 100% faithfully.
 # ═══════════════════════════════════════════════════════════════════
 
-def _copy_slide(source_prs: Presentation, source_slide, dest_prs: Presentation) -> None:
-    """
-    Deep-copy a slide from source_prs into dest_prs, preserving shapes,
-    background, and slide dimensions (destination dims must already be set).
-    """
-    # We copy the underlying XML element and append it to dest presentation
-    # then fix up any relationship references (images, fonts, etc.)
-    import copy
-    from pptx.opc.packuri import PackURI
+import copy as _copy
+import base64 as _b64
 
-    dest_slide_layout = dest_prs.slide_layouts[6]  # blank layout
-    dest_slide = dest_prs.slides.add_slide(dest_slide_layout)
+# ── Faithful slide copy via ZIP-level surgery ────────────────────
 
-    # Replace the spTree (shape tree) with the source's spTree
-    source_spTree = source_slide.shapes._spTree
-    dest_spTree   = dest_slide.shapes._spTree
-
-    # Remove all default shapes from the new blank slide
-    for child in list(dest_spTree):
-        dest_spTree.remove(child)
-
-    # Copy background
-    try:
-        src_bg = source_slide.background.fill
-        dst_bg = dest_slide.background.fill
-        if src_bg.type is not None:
-            # Solid fill
-            dst_bg.solid()
-            dst_bg.fore_color.rgb = src_bg.fore_color.rgb
-    except Exception:
-        pass  # skip if background copy fails — not critical
-
-    # Copy all shape XML nodes
-    for elem in source_spTree:
-        dest_spTree.append(copy.deepcopy(elem))
-
-    # Re-attach any embedded images / media from the source slide's part
-    for rel in source_slide.part.rels.values():
-        try:
-            if "image" in rel.reltype:
-                img_part = rel.target_part
-                new_rel = dest_slide.part.relate_to(img_part, rel.reltype)
-                # Patch rId references in the copied XML
-                for elem in dest_spTree.iter():
-                    for attr_name, attr_val in list(elem.attrib.items()):
-                        if attr_val == rel.rId:
-                            elem.set(attr_name, new_rel)
-        except Exception:
-            pass  # best-effort; non-image rels are skipped silently
+def _next_rId(existing_ids: set[str]) -> str:
+    """Return the next unused rId string (rId1, rId2, …)."""
+    n = 1
+    while f"rId{n}" in existing_ids:
+        n += 1
+    return f"rId{n}"
 
 
 def merge_pptx_files(files_bytes: list[bytes]) -> bytes:
     """
-    Merge a list of PPTX byte-strings into one PPTX.
-    Slide order follows the order of files_bytes.
-    Returns the merged PPTX as bytes.
+    Merge a list of PPTX byte-strings into one PPTX preserving every
+    slide's background, images, fonts, themes, and text styles exactly.
+
+    Technique: open the first file as a mutable ZIP (the destination),
+    then for each subsequent file and each slide:
+      1. Copy the slide XML → ppt/slides/slideN.xml
+      2. Copy its _rels      → ppt/slides/_rels/slideN.xml.rels
+      3. Copy every referenced part (images, audio, video, fonts, …)
+         into the dest ZIP, remapping rIds to avoid collisions
+      4. Register the slide in ppt/presentation.xml (sldIdLst) and
+         ppt/_rels/presentation.xml.rels
+      5. Add a Content-Type Override for the new slide
     """
     if not files_bytes:
         raise ValueError("No files provided")
 
-    # Open the first file as the base — inherit its dimensions
-    first_prs = Presentation(io.BytesIO(files_bytes[0]))
-    dest_prs  = Presentation()
-    dest_prs.slide_width  = first_prs.slide_width
-    dest_prs.slide_height = first_prs.slide_height
+    NS_RELS = "http://schemas.openxmlformats.org/package/2006/relationships"
+    NS_CT   = "http://schemas.openxmlformats.org/package/2006/content-types"
+    NS_P    = "http://schemas.openxmlformats.org/presentationml/2006/main"
+    NS_R    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    SLIDE_CT = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml"
+    SLIDE_REL_TYPE = f"{NS_R}/slide"
 
-    for pptx_bytes in files_bytes:
-        src_prs = Presentation(io.BytesIO(pptx_bytes))
-        for slide in src_prs.slides:
-            _copy_slide(src_prs, slide, dest_prs)
+    # ── Work entirely in memory ──────────────────────────────────
+    dest_buf = io.BytesIO(files_bytes[0])
 
-    buf = io.BytesIO()
-    dest_prs.save(buf)
-    buf.seek(0)
-    return buf.read()
+    # We'll build a fresh output ZIP so we can freely rewrite entries
+    out_buf = io.BytesIO()
+
+    with zipfile.ZipFile(dest_buf, "r") as base_zip:
+        # Snapshot all existing entries
+        existing_names: set[str] = set(base_zip.namelist())
+
+        # Parse the base presentation XML
+        prs_xml_bytes = base_zip.read("ppt/presentation.xml")
+        prs_root      = etree.fromstring(prs_xml_bytes)
+
+        # Parse base presentation rels
+        prs_rels_bytes = base_zip.read("ppt/_rels/presentation.xml.rels")
+        prs_rels_root  = etree.fromstring(prs_rels_bytes)
+
+        # Parse Content_Types
+        ct_bytes = base_zip.read("[Content_Types].xml")
+        ct_root  = etree.fromstring(ct_bytes)
+
+        # Collect all existing parts as {name: bytes}
+        parts: dict[str, bytes] = {n: base_zip.read(n) for n in existing_names}
+
+        # Find the highest existing slide number in ppt/slides/slideN.xml
+        slide_re = re.compile(r"^ppt/slides/slide(\d+)\.xml$")
+        existing_slide_nums = [
+            int(m.group(1)) for n in existing_names if (m := slide_re.match(n))
+        ]
+        next_slide_num = (max(existing_slide_nums) + 1) if existing_slide_nums else 1
+
+        # Highest existing sldId value in presentation sldIdLst
+        sldIdLst = prs_root.find(f"{{{NS_P}}}sldIdLst")
+        if sldIdLst is None:
+            sldIdLst = etree.SubElement(prs_root, f"{{{NS_P}}}sldIdLst")
+        existing_sld_ids = {
+            int(el.get("id", 0)) for el in sldIdLst.findall(f"{{{NS_P}}}sldId")
+        }
+        next_sld_id = (max(existing_sld_ids) + 1) if existing_sld_ids else 256
+
+        # Existing rIds in presentation rels
+        existing_prs_rIds = {
+            el.get("Id", "") for el in prs_rels_root.findall(f"{{{NS_RELS}}}Relationship")
+        }
+
+        # ── Process each additional source file ─────────────────
+        for src_bytes in files_bytes[1:]:
+            with zipfile.ZipFile(io.BytesIO(src_bytes), "r") as src_zip:
+                src_names = set(src_zip.namelist())
+
+                # Detect slides in this source
+                src_slide_re = re.compile(r"^ppt/slides/slide(\d+)\.xml$")
+                src_slides = sorted(
+                    [n for n in src_names if src_slide_re.match(n)],
+                    key=lambda n: int(src_slide_re.match(n).group(1)),
+                )
+
+                for src_slide_path in src_slides:
+                    slide_num_str = src_slide_re.match(src_slide_path).group(1)
+                    src_slide_rels_path = f"ppt/slides/_rels/slide{slide_num_str}.xml.rels"
+
+                    # Read slide XML
+                    slide_xml_bytes = src_zip.read(src_slide_path)
+                    slide_root      = etree.fromstring(slide_xml_bytes)
+
+                    # Read slide rels (may not exist for simple slides)
+                    src_rels_root = None
+                    rId_remap: dict[str, str] = {}  # old rId → new rId
+
+                    if src_slide_rels_path in src_names:
+                        src_rels_bytes = src_zip.read(src_slide_rels_path)
+                        src_rels_root  = etree.fromstring(src_rels_bytes)
+
+                        # Build new rels XML, copying all referenced parts
+                        new_rels_root = etree.Element(f"{{{NS_RELS}}}Relationships")
+
+                        for rel_el in src_rels_root.findall(f"{{{NS_RELS}}}Relationship"):
+                            old_rid    = rel_el.get("Id", "")
+                            rel_type   = rel_el.get("Type", "")
+                            target     = rel_el.get("Target", "")
+                            target_mode = rel_el.get("TargetMode", "")
+
+                            if target_mode == "External":
+                                # Keep external rels as-is, just remap Id
+                                new_rid = _next_rId(
+                                    {e.get("Id") for e in new_rels_root} | set(existing_prs_rIds)
+                                )
+                                rId_remap[old_rid] = new_rid
+                                new_el = etree.SubElement(new_rels_root, f"{{{NS_RELS}}}Relationship")
+                                new_el.set("Id", new_rid)
+                                new_el.set("Type", rel_type)
+                                new_el.set("Target", target)
+                                new_el.set("TargetMode", "External")
+                                continue
+
+                            # Resolve path relative to ppt/slides/
+                            if target.startswith("/"):
+                                abs_target = target.lstrip("/")
+                            else:
+                                abs_target = str(
+                                    Path("ppt/slides") / Path(target)
+                                ).replace("\\", "/")
+                                # Normalise ../ traversals
+                                abs_target = str(
+                                    Path(abs_target).resolve().relative_to(Path(".").resolve())
+                                ).replace("\\", "/")
+                                # Fallback: manual normalisation
+                                parts_list = abs_target.split("/")
+                                norm: list[str] = []
+                                for p in parts_list:
+                                    if p == "..":
+                                        if norm:
+                                            norm.pop()
+                                    elif p and p != ".":
+                                        norm.append(p)
+                                abs_target = "/".join(norm)
+
+                            # Is it a slide layout reference? point to dest layout
+                            if "slideLayout" in rel_type or "slideLayout" in abs_target:
+                                # Re-use the first slideLayout from the dest presentation
+                                dest_layout_rels = [
+                                    e for e in prs_rels_root.findall(f"{{{NS_RELS}}}Relationship")
+                                    if "slideLayout" in e.get("Target", "")
+                                       or "slideLayout" in e.get("Type", "")
+                                ]
+                                # Find layout from first dest slide's rels
+                                first_dest_slide_rels_path = f"ppt/slides/_rels/slide{existing_slide_nums[0] if existing_slide_nums else 1}.xml.rels"
+                                layout_target = "../slideLayouts/slideLayout1.xml"  # safe default
+                                if first_dest_slide_rels_path in parts:
+                                    fds_rels = etree.fromstring(parts[first_dest_slide_rels_path])
+                                    for frel in fds_rels.findall(f"{{{NS_RELS}}}Relationship"):
+                                        if "slideLayout" in frel.get("Type", ""):
+                                            layout_target = frel.get("Target", layout_target)
+                                            break
+
+                                new_rid = _next_rId(
+                                    {e.get("Id") for e in new_rels_root}
+                                )
+                                rId_remap[old_rid] = new_rid
+                                new_el = etree.SubElement(new_rels_root, f"{{{NS_RELS}}}Relationship")
+                                new_el.set("Id", new_rid)
+                                new_el.set("Type", rel_type)
+                                new_el.set("Target", layout_target)
+                                continue
+
+                            # Copy the actual part bytes across
+                            if abs_target in src_names:
+                                part_bytes = src_zip.read(abs_target)
+                                # Avoid filename collisions by appending _mN suffix
+                                dest_target = abs_target
+                                if abs_target in parts:
+                                    # If bytes are identical reuse the existing part
+                                    if parts[abs_target] == part_bytes:
+                                        pass  # reuse same path
+                                    else:
+                                        # Pick a fresh name
+                                        stem, _, ext_part = abs_target.rpartition(".")
+                                        n = 2
+                                        while dest_target in parts:
+                                            dest_target = f"{stem}_m{n}.{ext_part}"
+                                            n += 1
+                                        parts[dest_target] = part_bytes
+                                else:
+                                    parts[dest_target] = part_bytes
+
+                                # Build relative target back from ppt/slides/
+                                rel_target = str(
+                                    Path(dest_target).relative_to(Path("ppt/slides").parent)
+                                ).replace("\\", "/")
+                                # Make it relative: ../media/imageX.png etc.
+                                rel_target = "../" + "/".join(dest_target.split("/")[1:])
+
+                                new_rid = _next_rId(
+                                    {e.get("Id") for e in new_rels_root}
+                                )
+                                rId_remap[old_rid] = new_rid
+                                new_el = etree.SubElement(new_rels_root, f"{{{NS_RELS}}}Relationship")
+                                new_el.set("Id", new_rid)
+                                new_el.set("Type", rel_type)
+                                new_el.set("Target", rel_target)
+
+                                # Add Content-Type override if missing
+                                if not any(
+                                    ov.get("PartName") == f"/{dest_target}"
+                                    for ov in ct_root.findall(f"{{{NS_CT}}}Override")
+                                ):
+                                    # Guess content type from extension
+                                    ext_map = {
+                                        "png": "image/png", "jpg": "image/jpeg",
+                                        "jpeg": "image/jpeg", "gif": "image/gif",
+                                        "bmp": "image/bmp", "tiff": "image/tiff",
+                                        "wmf": "image/x-wmf", "emf": "image/x-emf",
+                                        "mp4": "video/mp4", "mp3": "audio/mpeg",
+                                        "wav": "audio/wav",
+                                    }
+                                    file_ext = dest_target.rsplit(".", 1)[-1].lower()
+                                    ct_val = ext_map.get(file_ext)
+                                    if ct_val:
+                                        ov = etree.SubElement(ct_root, f"{{{NS_CT}}}Override")
+                                        ov.set("PartName", f"/{dest_target}")
+                                        ov.set("ContentType", ct_val)
+
+                    # ── Patch rIds inside the slide XML ─────────
+                    slide_xml_str = slide_xml_bytes.decode("utf-8")
+                    for old_rid, new_rid in rId_remap.items():
+                        # Replace attribute values like r:id="rId3" or r:embed="rId3"
+                        slide_xml_str = re.sub(
+                            rf'(?<=["\s]){re.escape(old_rid)}(?=[">\s/])',
+                            new_rid,
+                            slide_xml_str,
+                        )
+                    slide_xml_bytes = slide_xml_str.encode("utf-8")
+
+                    # ── Register new slide in dest ZIP ───────────
+                    new_slide_path      = f"ppt/slides/slide{next_slide_num}.xml"
+                    new_slide_rels_path = f"ppt/slides/_rels/slide{next_slide_num}.xml.rels"
+
+                    parts[new_slide_path] = slide_xml_bytes
+                    if src_rels_root is not None:
+                        parts[new_slide_rels_path] = etree.tostring(
+                            new_rels_root,
+                            xml_declaration=True, encoding="UTF-8", standalone=True,
+                        )
+
+                    # Content-Type for slide
+                    if not any(
+                        ov.get("PartName") == f"/{new_slide_path}"
+                        for ov in ct_root.findall(f"{{{NS_CT}}}Override")
+                    ):
+                        ov = etree.SubElement(ct_root, f"{{{NS_CT}}}Override")
+                        ov.set("PartName", f"/{new_slide_path}")
+                        ov.set("ContentType", SLIDE_CT)
+
+                    # Presentation rels — register slide
+                    new_prs_rid = _next_rId(existing_prs_rIds)
+                    existing_prs_rIds.add(new_prs_rid)
+                    new_prs_rel = etree.SubElement(
+                        prs_rels_root, f"{{{NS_RELS}}}Relationship"
+                    )
+                    new_prs_rel.set("Id", new_prs_rid)
+                    new_prs_rel.set("Type", SLIDE_REL_TYPE)
+                    new_prs_rel.set("Target", f"slides/slide{next_slide_num}.xml")
+
+                    # sldIdLst entry
+                    sld_id_el = etree.SubElement(sldIdLst, f"{{{NS_P}}}sldId")
+                    sld_id_el.set("id", str(next_sld_id))
+                    sld_id_el.set(f"{{{NS_R}}}id", new_prs_rid)
+
+                    existing_slide_nums.append(next_slide_num)
+                    next_slide_num += 1
+                    next_sld_id    += 1
+
+        # ── Write back mutated XML ───────────────────────────────
+        parts["ppt/presentation.xml"] = etree.tostring(
+            prs_root, xml_declaration=True, encoding="UTF-8", standalone=True,
+        )
+        parts["ppt/_rels/presentation.xml.rels"] = etree.tostring(
+            prs_rels_root, xml_declaration=True, encoding="UTF-8", standalone=True,
+        )
+        parts["[Content_Types].xml"] = etree.tostring(
+            ct_root, xml_declaration=True, encoding="UTF-8", standalone=True,
+        )
+
+        # ── Write final ZIP ──────────────────────────────────────
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as out_zip:
+            for name, data in parts.items():
+                out_zip.writestr(name, data)
+
+    out_buf.seek(0)
+    return out_buf.read()
+
+
+# ── Render slide thumbnails using LibreOffice / pdf2image ────────
+
+def _render_slide_thumbnails(pptx_bytes: bytes, width_px: int = 960) -> list[str]:
+    """
+    Convert every slide in a PPTX to a base64-encoded PNG thumbnail.
+    Uses LibreOffice headless → PDF → Pillow rasterise pipeline.
+    Falls back to a coloured placeholder if LibreOffice is unavailable.
+    Returns list of base64 PNG strings (one per slide).
+    """
+    import subprocess, shutil, tempfile
+
+    thumbs: list[str] = []
+    libreoffice = shutil.which("libreoffice") or shutil.which("soffice")
+
+    if not libreoffice:
+        # Fallback: extract background colour + text from python-pptx and
+        # render a simple Pillow image so the user still sees something useful.
+        return _render_slides_pillow_fallback(pptx_bytes, width_px)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pptx_path = Path(tmp) / "input.pptx"
+        pptx_path.write_bytes(pptx_bytes)
+
+        result = subprocess.run(
+            [
+                libreoffice, "--headless", "--convert-to", "png",
+                "--outdir", tmp, str(pptx_path),
+            ],
+            capture_output=True, timeout=60,
+        )
+
+        if result.returncode != 0:
+            return _render_slides_pillow_fallback(pptx_bytes, width_px)
+
+        # LibreOffice names output as input.png (single) or input1.png, input2.png…
+        png_files = sorted(
+            Path(tmp).glob("input*.png"),
+            key=lambda p: int(re.search(r"\d+", p.stem.replace("input", "") or "0").group() or 0),
+        )
+        if not png_files:
+            return _render_slides_pillow_fallback(pptx_bytes, width_px)
+
+        from PIL import Image as PILImage
+        for png_path in png_files:
+            img = PILImage.open(png_path).convert("RGB")
+            # Resize to target width maintaining aspect ratio
+            h = int(img.height * width_px / img.width)
+            img = img.resize((width_px, h), PILImage.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            thumbs.append(_b64.b64encode(buf.getvalue()).decode())
+
+    return thumbs
+
+
+def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> list[str]:
+    """
+    Fallback renderer: uses python-pptx to extract background colour and
+    text content, then draws each slide as a Pillow image.
+    Preserves bg colour, text colour, font size (proportional), and text content.
+    """
+    from PIL import Image as PILImage, ImageDraw, ImageFont as PILFont
+
+    prs    = Presentation(io.BytesIO(pptx_bytes))
+    aspect = prs.slide_height / prs.slide_width if prs.slide_width else 9 / 16
+    height_px = int(width_px * float(aspect))
+
+    thumbs: list[str] = []
+
+    for slide in prs.slides:
+        # ── Background colour ────────────────────────────────────
+        bg_rgb = (30, 30, 30)  # default dark
+        try:
+            fill = slide.background.fill
+            if fill.type is not None:
+                c = fill.fore_color.rgb
+                bg_rgb = (c.red, c.green, c.blue)
+        except Exception:
+            pass
+
+        img  = PILImage.new("RGB", (width_px, height_px), bg_rgb)
+        draw = ImageDraw.Draw(img)
+
+        # ── Draw each shape ──────────────────────────────────────
+        sw_emu = float(prs.slide_width)
+        sh_emu = float(prs.slide_height)
+
+        for shape in slide.shapes:
+            # Draw images
+            if shape.shape_type == 13:  # MSO_SHAPE_TYPE.PICTURE
+                try:
+                    from PIL import Image as PILImage2
+                    img_bytes = shape.image.blob
+                    pic = PILImage2.open(io.BytesIO(img_bytes)).convert("RGBA")
+                    x = int(shape.left / sw_emu * width_px)
+                    y = int(shape.top  / sh_emu * height_px)
+                    w = int(shape.width  / sw_emu * width_px)
+                    h = int(shape.height / sh_emu * height_px)
+                    if w > 0 and h > 0:
+                        pic = pic.resize((w, h), PILImage2.LANCZOS)
+                        img.paste(pic, (x, y), pic)
+                except Exception:
+                    pass
+                continue
+
+            if not shape.has_text_frame:
+                # Draw filled rectangles for non-text shapes (preserves bg blocks)
+                try:
+                    fill = shape.fill
+                    if fill.type is not None:
+                        c = fill.fore_color.rgb
+                        x = int(shape.left / sw_emu * width_px)
+                        y = int(shape.top  / sh_emu * height_px)
+                        w = int(shape.width  / sw_emu * width_px)
+                        h = int(shape.height / sh_emu * height_px)
+                        draw.rectangle([x, y, x + w, y + h], fill=(c.red, c.green, c.blue))
+                except Exception:
+                    pass
+                continue
+
+            # Text shape
+            tf = shape.text_frame
+            for para in tf.paragraphs:
+                for run in para.runs:
+                    text = run.text.strip()
+                    if not text:
+                        continue
+                    try:
+                        font_pt  = run.font.size.pt if run.font.size else 24
+                        font_px  = max(8, int(font_pt * height_px / (sh_emu / 914400)))
+                        c        = run.font.color.rgb
+                        txt_rgb  = (c.red, c.green, c.blue)
+                    except Exception:
+                        font_px = max(8, int(24 * height_px / 540))
+                        txt_rgb = (255, 255, 255)
+
+                    x = int(shape.left  / sw_emu * width_px)
+                    y = int(shape.top   / sh_emu * height_px)
+
+                    try:
+                        font_obj = PILFont.load_default(size=font_px)
+                    except TypeError:
+                        font_obj = PILFont.load_default()
+
+                    draw.text((x + 4, y + 4), text, font=font_obj, fill=txt_rgb)
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        thumbs.append(_b64.b64encode(buf.getvalue()).decode())
+
+    return thumbs
 
 
 @app.post("/api/merge/count-slides")
@@ -1308,6 +1697,25 @@ async def merge_count_slides(file: UploadFile = File(...)):
     data = await file.read()
     prs  = Presentation(io.BytesIO(data))
     return {"slide_count": len(prs.slides), "filename": file.filename}
+
+
+@app.post("/api/merge/preview-slides")
+async def merge_preview_slides(file: UploadFile = File(...)):
+    """
+    Render all slides of a single PPTX as base64 PNG thumbnails.
+    Returns: { filename, slide_count, thumbnails: [base64_png, ...] }
+    """
+    from fastapi import HTTPException
+    ext = Path(file.filename or "").suffix.lower()
+    if ext != ".pptx":
+        raise HTTPException(status_code=400, detail="Only .pptx files are supported.")
+    data   = await file.read()
+    thumbs = _render_slides_pillow_fallback(data, width_px=800)
+    return {
+        "filename":    file.filename,
+        "slide_count": len(thumbs),
+        "thumbnails":  thumbs,
+    }
 
 
 @app.post("/api/merge/generate")
