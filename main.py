@@ -1361,15 +1361,9 @@ def merge_pptx_files(files_bytes: list[bytes]) -> bytes:
                             if target.startswith("/"):
                                 abs_target = target.lstrip("/")
                             else:
-                                abs_target = str(
-                                    Path("ppt/slides") / Path(target)
-                                ).replace("\\", "/")
-                                # Normalise ../ traversals
-                                abs_target = str(
-                                    Path(abs_target).resolve().relative_to(Path(".").resolve())
-                                ).replace("\\", "/")
-                                # Fallback: manual normalisation
-                                parts_list = abs_target.split("/")
+                                # Join with the slide's directory then normalise ../
+                                raw = "ppt/slides/" + target
+                                parts_list = raw.split("/")
                                 norm: list[str] = []
                                 for p in parts_list:
                                     if p == "..":
@@ -1415,24 +1409,24 @@ def merge_pptx_files(files_bytes: list[bytes]) -> bytes:
                                 if abs_target in parts:
                                     # If bytes are identical reuse the existing part
                                     if parts[abs_target] == part_bytes:
-                                        pass  # reuse same path
+                                        pass  # reuse same path — dest_target stays as abs_target
                                     else:
                                         # Pick a fresh name
                                         stem, _, ext_part = abs_target.rpartition(".")
                                         n = 2
-                                        while dest_target in parts:
-                                            dest_target = f"{stem}_m{n}.{ext_part}"
+                                        candidate = abs_target
+                                        while candidate in parts:
+                                            candidate = f"{stem}_m{n}.{ext_part}"
                                             n += 1
+                                        dest_target = candidate
                                         parts[dest_target] = part_bytes
                                 else:
                                     parts[dest_target] = part_bytes
 
                                 # Build relative target back from ppt/slides/
-                                rel_target = str(
-                                    Path(dest_target).relative_to(Path("ppt/slides").parent)
-                                ).replace("\\", "/")
-                                # Make it relative: ../media/imageX.png etc.
-                                rel_target = "../" + "/".join(dest_target.split("/")[1:])
+                                # dest_target is like "ppt/media/image1.png" → "../media/image1.png"
+                                dest_parts = dest_target.split("/")
+                                rel_target = "../" + "/".join(dest_parts[1:])
 
                                 new_rid = _next_rId(
                                     {e.get("Id") for e in new_rels_root}
@@ -1467,12 +1461,11 @@ def merge_pptx_files(files_bytes: list[bytes]) -> bytes:
                     # ── Patch rIds inside the slide XML ─────────
                     slide_xml_str = slide_xml_bytes.decode("utf-8")
                     for old_rid, new_rid in rId_remap.items():
-                        # Replace attribute values like r:id="rId3" or r:embed="rId3"
-                        slide_xml_str = re.sub(
-                            rf'(?<=["\s]){re.escape(old_rid)}(?=[">\s/])',
-                            new_rid,
-                            slide_xml_str,
-                        )
+                        # Replace all attribute-value occurrences of the rId.
+                        # XML attributes always appear as ="rId3" or ='rId3'.
+                        # Use both quote styles to be safe.
+                        slide_xml_str = slide_xml_str.replace(f'="{old_rid}"', f'="{new_rid}"')
+                        slide_xml_str = slide_xml_str.replace(f"='{old_rid}'", f"='{new_rid}'")
                     slide_xml_bytes = slide_xml_str.encode("utf-8")
 
                     # ── Register new slide in dest ZIP ───────────
@@ -1483,6 +1476,29 @@ def merge_pptx_files(files_bytes: list[bytes]) -> bytes:
                     if src_rels_root is not None:
                         parts[new_slide_rels_path] = etree.tostring(
                             new_rels_root,
+                            xml_declaration=True, encoding="UTF-8", standalone=True,
+                        )
+                    else:
+                        # No rels in source — create a minimal one pointing at a slide layout
+                        min_rels = etree.Element(f"{{{NS_RELS}}}Relationships")
+                        layout_target = "../slideLayouts/slideLayout1.xml"
+                        first_snum = existing_slide_nums[0] if existing_slide_nums else 1
+                        fds_path = f"ppt/slides/_rels/slide{first_snum}.xml.rels"
+                        if fds_path in parts:
+                            try:
+                                fds_r = etree.fromstring(parts[fds_path])
+                                for frel in fds_r.findall(f"{{{NS_RELS}}}Relationship"):
+                                    if "slideLayout" in frel.get("Type", ""):
+                                        layout_target = frel.get("Target", layout_target)
+                                        break
+                            except Exception:
+                                pass
+                        lo_el = etree.SubElement(min_rels, f"{{{NS_RELS}}}Relationship")
+                        lo_el.set("Id", "rId1")
+                        lo_el.set("Type", f"{NS_R}/slideLayout")
+                        lo_el.set("Target", layout_target)
+                        parts[new_slide_rels_path] = etree.tostring(
+                            min_rels,
                             xml_declaration=True, encoding="UTF-8", standalone=True,
                         )
 
@@ -1597,6 +1613,37 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
     """
     from PIL import Image as PILImage, ImageDraw, ImageFont as PILFont
 
+    # ── Font cache: prefer Khmer TTF from the app's fonts/ directory ──
+    _FONT_DIR = Path(__file__).parent / "fonts"
+    _font_cache: dict[int, object] = {}
+
+    def _get_font(size_px: int) -> object:
+        size_px = max(8, min(size_px, 200))
+        if size_px in _font_cache:
+            return _font_cache[size_px]
+        # Try each bundled TTF in preference order
+        for ttf_name in [
+            "KhmerOSBattambang-Regular.ttf",
+            "KhmerOS_.ttf",
+            "KhmerOSMoulLight.ttf",
+            "KhmerOS_muol.ttf",
+        ]:
+            ttf_path = _FONT_DIR / ttf_name
+            if ttf_path.exists():
+                try:
+                    font = PILFont.truetype(str(ttf_path), size=size_px)
+                    _font_cache[size_px] = font
+                    return font
+                except Exception:
+                    pass
+        # Last resort: Pillow built-in bitmap font (Latin only)
+        try:
+            font = PILFont.load_default(size=size_px)
+        except TypeError:
+            font = PILFont.load_default()
+        _font_cache[size_px] = font
+        return font
+
     prs    = Presentation(io.BytesIO(pptx_bytes))
     aspect = prs.slide_height / prs.slide_width if prs.slide_width else 9 / 16
     height_px = int(width_px * float(aspect))
@@ -1622,19 +1669,33 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
         sh_emu = float(prs.slide_height)
 
         for shape in slide.shapes:
-            # Draw images
-            if shape.shape_type == 13:  # MSO_SHAPE_TYPE.PICTURE
+            # Draw images — check both shape_type and hasattr for robustness
+            has_image = False
+            try:
+                has_image = hasattr(shape, "image") and shape.image is not None
+            except Exception:
+                pass
+            if not has_image and shape.shape_type == 13:
+                has_image = True
+
+            if has_image:
                 try:
                     from PIL import Image as PILImage2
                     img_bytes = shape.image.blob
-                    pic = PILImage2.open(io.BytesIO(img_bytes)).convert("RGBA")
+                    pic = PILImage2.open(io.BytesIO(img_bytes))
                     x = int(shape.left / sw_emu * width_px)
                     y = int(shape.top  / sh_emu * height_px)
                     w = int(shape.width  / sw_emu * width_px)
                     h = int(shape.height / sh_emu * height_px)
                     if w > 0 and h > 0:
                         pic = pic.resize((w, h), PILImage2.LANCZOS)
-                        img.paste(pic, (x, y), pic)
+                        # Composite properly regardless of mode
+                        if pic.mode == "RGBA":
+                            bg_patch = PILImage2.new("RGBA", (w, h), bg_rgb + (255,))
+                            bg_patch.alpha_composite(pic)
+                            img.paste(bg_patch.convert("RGB"), (x, y))
+                        else:
+                            img.paste(pic.convert("RGB"), (x, y))
                 except Exception:
                     pass
                 continue
@@ -1656,29 +1717,49 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
 
             # Text shape
             tf = shape.text_frame
+            # Accumulate paragraph y offsets
+            shape_x = int(shape.left  / sw_emu * width_px)
+            shape_y = int(shape.top   / sh_emu * height_px)
+            line_y  = shape_y
+
             for para in tf.paragraphs:
+                para_text_parts: list[tuple[str, int, tuple]] = []
+                max_font_px = max(8, int(18 * height_px / 540))
+
                 for run in para.runs:
-                    text = run.text.strip()
+                    text = run.text
                     if not text:
                         continue
                     try:
-                        font_pt  = run.font.size.pt if run.font.size else 24
+                        font_pt  = run.font.size.pt if run.font.size else 18
                         font_px  = max(8, int(font_pt * height_px / (sh_emu / 914400)))
-                        c        = run.font.color.rgb
-                        txt_rgb  = (c.red, c.green, c.blue)
                     except Exception:
-                        font_px = max(8, int(24 * height_px / 540))
-                        txt_rgb = (255, 255, 255)
-
-                    x = int(shape.left  / sw_emu * width_px)
-                    y = int(shape.top   / sh_emu * height_px)
-
+                        font_px = max(8, int(18 * height_px / 540))
                     try:
-                        font_obj = PILFont.load_default(size=font_px)
-                    except TypeError:
-                        font_obj = PILFont.load_default()
+                        c       = run.font.color.rgb
+                        txt_rgb = (c.red, c.green, c.blue)
+                    except Exception:
+                        txt_rgb = (255, 255, 255)
+                    max_font_px = max(max_font_px, font_px)
+                    para_text_parts.append((text, font_px, txt_rgb))
 
-                    draw.text((x + 4, y + 4), text, font=font_obj, fill=txt_rgb)
+                if not para_text_parts:
+                    # Empty paragraph — small line gap
+                    line_y += max(8, int(14 * height_px / 540))
+                    continue
+
+                # Draw all runs in this paragraph on the same line
+                run_x = shape_x + 4
+                for text, font_px, txt_rgb in para_text_parts:
+                    font_obj = _get_font(font_px)
+                    draw.text((run_x, line_y), text, font=font_obj, fill=txt_rgb)
+                    try:
+                        bbox = draw.textbbox((run_x, line_y), text, font=font_obj)
+                        run_x = bbox[2] + 2
+                    except Exception:
+                        run_x += font_px * len(text) // 2
+
+                line_y += max_font_px + 4
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
