@@ -1242,11 +1242,12 @@ def _setup_static() -> None:
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
     """Catch-all: serve index.html for any path not matched by /api routes."""
-    if not _FRONTEND_DIST.exists():
-        return FileResponse  # no frontend built yet — shouldn't be reached
+    index = _FRONTEND_DIST / "index.html"
+    if not index.exists():
+        return {"detail": "Frontend not built"}
     candidate = _FRONTEND_DIST / full_path
     if candidate.is_file():
         return FileResponse(str(candidate))
-    return FileResponse(str(_FRONTEND_DIST / "index.html"))
+    return FileResponse(str(index))
 
 _setup_static()
