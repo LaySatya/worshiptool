@@ -12,9 +12,10 @@ build/
 output/
 uploads/
 
-# Frontend build artifacts (built on Railway, not committed)
+# Frontend build artifacts (built on Render, not committed)
 frontend/dist/
 frontend/node_modules/
+# DO NOT ignore frontend/package-lock.json — needed for npm ci on Render
 
 # OS
 .DS_Store

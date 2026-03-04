@@ -36,7 +36,7 @@ pip install -r requirements.txt
 # ── 4. Frontend build ────────────────────────────────────────────
 echo "=== Building frontend ==="
 cd frontend
-npm ci
+npm install          # use install (not ci) — no lockfile required
 npm run build
 cd ..
 
