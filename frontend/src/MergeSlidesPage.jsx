@@ -78,29 +78,30 @@ function SlideThumbnail({ thumb, label, active, onClick, loading }) {
 function SlideViewer({ thumb, label, loading }) {
   return (
     <div
-      className="relative w-full rounded-xl overflow-hidden border border-slate-200 shadow bg-slate-900 select-none"
+      className="relative w-full rounded-xl overflow-hidden border border-slate-200 shadow select-none bg-white"
       style={{ aspectRatio: '16/9' }}
     >
       {loading ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-          <Loader2 size={24} className="text-slate-500 animate-spin" />
-          <p className="text-slate-500 text-xs">Rendering slide…</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-50">
+          <Loader2 size={24} className="text-slate-400 animate-spin" />
+          <p className="text-slate-400 text-xs">Rendering slide…</p>
         </div>
       ) : thumb ? (
         <img
           src={`data:image/png;base64,${thumb}`}
           alt={label}
-          className="w-full h-full object-contain"
+          className="absolute inset-0 w-full h-full"
+          style={{ objectFit: 'fill' }}
           draggable={false}
         />
       ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-600">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400 bg-slate-50">
           <ImageIcon size={32} />
           <p className="text-xs">No preview available</p>
         </div>
       )}
-      {label && (
-        <div className="absolute top-2 left-2 bg-black/50 text-white/80 text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm pointer-events-none">
+      {label && !loading && thumb && (
+        <div className="absolute top-2 left-2 bg-black/40 text-white/90 text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm pointer-events-none">
           {label}
         </div>
       )}
@@ -165,6 +166,73 @@ function FileCard({ entry, index, total, onRemove, onMoveUp, onMoveDown, isActiv
           className="p-1 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition ml-1">
           <Trash2 size={11} />
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Horizontally scrollable strip with arrow buttons ─────────────
+function ScrollStrip({ children, innerRef, className = '' }) {
+  const localRef = useRef(null)
+  const ref = innerRef ?? localRef
+  const [canLeft, setCanLeft]   = useState(false)
+  const [canRight, setCanRight] = useState(false)
+
+  const update = () => {
+    const el = ref.current
+    if (!el) return
+    setCanLeft(el.scrollLeft > 4)
+    setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4)
+  }
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => { el.removeEventListener('scroll', update); ro.disconnect() }
+  }, [children])
+
+  const scroll = (dir) => {
+    const el = ref.current
+    if (!el) return
+    el.scrollBy({ left: dir * Math.max(200, el.clientWidth * 0.6), behavior: 'smooth' })
+  }
+
+  return (
+    <div className={`relative ${className}`}>
+      {/* Left fade + arrow */}
+      <div className={`absolute left-0 top-0 bottom-0 z-10 flex items-center transition-opacity duration-150 ${canLeft ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className="absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-white to-transparent pointer-events-none" />
+        <button
+          onClick={() => scroll(-1)}
+          className="relative z-10 w-6 h-6 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-500 hover:text-brand-500 hover:border-brand-300 transition -ml-0.5"
+        >
+          <ChevronLeft size={13} />
+        </button>
+      </div>
+
+      {/* Right fade + arrow */}
+      <div className={`absolute right-0 top-0 bottom-0 z-10 flex items-center transition-opacity duration-150 ${canRight ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-transparent pointer-events-none" />
+        <button
+          onClick={() => scroll(1)}
+          className="relative z-10 w-6 h-6 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-500 hover:text-brand-500 hover:border-brand-300 transition -mr-0.5"
+        >
+          <ChevronRight size={13} />
+        </button>
+      </div>
+
+      {/* Scrollable row — hide native scrollbar, use arrow buttons instead */}
+      <div
+        ref={ref}
+        className="flex gap-2 overflow-x-auto py-1 px-1"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
+        <style>{`.no-scrollbar::-webkit-scrollbar{display:none}`}</style>
+        {children}
       </div>
     </div>
   )
@@ -246,10 +314,8 @@ export default function MergeSlidesPage() {
     setActiveFileIdx(fi)
     setActiveSlideIdx(0)
     setTimeout(() => {
-      const firstOfFile = allSlides.findIndex(s => s.fileIdx === fi)
-      if (stripRef.current && firstOfFile >= 0) {
-        const btn = stripRef.current.querySelectorAll('button')[firstOfFile]
-        btn?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+      if (stripRef.current) {
+        stripRef.current.scrollTo({ left: 0, behavior: 'smooth' })
       }
     }, 50)
   }
@@ -260,8 +326,13 @@ export default function MergeSlidesPage() {
     setActiveFileIdx(slide.fileIdx)
     setActiveSlideIdx(slide.slideIdx)
     setTimeout(() => {
-      const btn = stripRef.current?.querySelectorAll('button')[flatIdx]
-      btn?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
+      if (!stripRef.current) return
+      // find the nth visible button in the strip (only current file's slides shown)
+      const btns = stripRef.current.querySelectorAll('button')
+      const visibleIdx = allSlides
+        .slice(0, flatIdx + 1)
+        .filter(s => s.fileIdx === slide.fileIdx).length - 1
+      btns[visibleIdx]?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
     }, 30)
   }
 
@@ -475,17 +546,17 @@ export default function MergeSlidesPage() {
 
             {/* All-slides strip */}
             <div className="card p-4 space-y-3">
-              {/* File tabs */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mr-1">All slides</span>
+              {/* File tabs — horizontal scroll if many files */}
+              <ScrollStrip className="pb-0">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 self-center shrink-0 mr-1">All slides</span>
                 {files.map((entry, fi) => (
                   <button key={entry.id} onClick={() => selectFile(fi)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all
+                    className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all
                       ${fi === activeFileIdx
                         ? 'bg-brand-500 text-white border-brand-500 shadow'
                         : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300 hover:text-brand-600'}`}>
                     <span className="opacity-60">#{fi + 1}</span>
-                    <span className="max-w-[100px] truncate">{entry.file.name.replace(/\.pptx$/i, '')}</span>
+                    <span className="max-w-[120px] truncate">{entry.file.name.replace(/\.pptx$/i, '')}</span>
                     {entry.slideCount != null && (
                       <span className={`text-[9px] rounded px-1 ${fi === activeFileIdx ? 'bg-white/20' : 'bg-slate-100 text-slate-400'}`}>
                         {entry.slideCount}s
@@ -493,10 +564,10 @@ export default function MergeSlidesPage() {
                     )}
                   </button>
                 ))}
-              </div>
+              </ScrollStrip>
 
               {/* Thumbnail strip for selected file */}
-              <div ref={stripRef} className="flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: 'thin' }}>
+              <ScrollStrip innerRef={stripRef}>
                 {allSlides.map((slide, flatIdx) => {
                   if (slide.fileIdx !== activeFileIdx) return null
                   return (
@@ -510,7 +581,7 @@ export default function MergeSlidesPage() {
                     />
                   )
                 })}
-              </div>
+              </ScrollStrip>
 
               {/* Full merge order strip */}
               {files.length >= 2 && (
@@ -518,7 +589,7 @@ export default function MergeSlidesPage() {
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
                     Merge order — all {totalSlides} slides
                   </p>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
+                  <ScrollStrip>
                     {allSlides.map((slide, flatIdx) => {
                       const isActive = slide.fileIdx === activeFileIdx && slide.slideIdx === activeSlideIdx
                       const colors = ['border-blue-300','border-purple-300','border-green-300','border-orange-300','border-pink-300','border-teal-300']
@@ -533,13 +604,13 @@ export default function MergeSlidesPage() {
                           style={{ width: 64, aspectRatio: '16/9' }}
                         >
                           {slide.loading ? (
-                            <div className="w-full h-full bg-slate-700 animate-pulse" />
+                            <div className="w-full h-full bg-slate-200 animate-pulse" />
                           ) : slide.thumb ? (
-                            <img src={`data:image/png;base64,${slide.thumb}`} className="w-full h-full object-cover" alt="" draggable={false} />
+                            <img src={`data:image/png;base64,${slide.thumb}`} className="w-full h-full" style={{ objectFit: 'fill' }} alt="" draggable={false} />
                           ) : (
-                            <div className="w-full h-full bg-slate-800" />
+                            <div className="w-full h-full bg-slate-100" />
                           )}
-                          <div className="absolute bottom-0 right-0 bg-black/60 text-white text-[8px] px-1 font-mono leading-tight">
+                          <div className="absolute bottom-0 right-0 bg-black/50 text-white text-[8px] px-1 font-mono leading-tight">
                             {flatIdx + 1}
                           </div>
                         </button>
@@ -552,7 +623,7 @@ export default function MergeSlidesPage() {
                       <span className="text-[8px] font-bold text-center leading-tight">{outputName || 'merged'}.pptx</span>
                       <span className="text-[8px] opacity-70">{totalSlides}s</span>
                     </div>
-                  </div>
+                  </ScrollStrip>
                 </div>
               )}
             </div>
