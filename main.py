@@ -1607,31 +1607,45 @@ def _render_slide_thumbnails(pptx_bytes: bytes, width_px: int = 960) -> list[str
 
 def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> list[str]:
     """
-    Fallback renderer: uses python-pptx to extract each slide's content and
-    draws a faithful Pillow image — correct background colour, images at the
-    right position/size, and text at the correct font size and colour.
+    Faithful Pillow-based slide renderer.
+    Handles: background fill, full-slide background images, text color (XML-based),
+    font size, paragraph alignment (center/right/left), line spacing, drop shadows,
+    and Khmer TTF fonts.
     """
     from PIL import Image as PILImage, ImageDraw, ImageFont as PILFont
+    from pptx.oxml.ns import qn as _qn
 
-    # ── Font cache: use Khmer TTF from the app's fonts/ directory ──────
+    # ── Font cache ──────────────────────────────────────────────────────
     _FONT_DIR = Path(__file__).parent / "fonts"
-    _font_cache: dict[int, object] = {}
+    _font_cache: dict[tuple, object] = {}
 
-    def _get_font(size_px: int) -> object:
-        size_px = max(6, min(size_px, 400))
-        if size_px in _font_cache:
-            return _font_cache[size_px]
-        for ttf_name in [
-            "KhmerOSBattambang-Regular.ttf",
-            "KhmerOS_.ttf",
-            "KhmerOSMoulLight.ttf",
-            "KhmerOS_muol.ttf",
-        ]:
+    def _get_font(size_px: int, bold: bool = False) -> object:
+        size_px = max(6, min(size_px, 500))
+        key = (size_px, bold)
+        if key in _font_cache:
+            return _font_cache[key]
+        # Prefer bold variant if available and requested
+        candidates = []
+        if bold:
+            candidates = [
+                "KhmerOS_muol.ttf",
+                "KhmerOSMoulLight.ttf",
+                "KhmerOSBattambang-Regular.ttf",
+                "KhmerOS_.ttf",
+            ]
+        else:
+            candidates = [
+                "KhmerOSBattambang-Regular.ttf",
+                "KhmerOS_.ttf",
+                "KhmerOSMoulLight.ttf",
+                "KhmerOS_muol.ttf",
+            ]
+        for ttf_name in candidates:
             ttf_path = _FONT_DIR / ttf_name
             if ttf_path.exists():
                 try:
                     font = PILFont.truetype(str(ttf_path), size=size_px)
-                    _font_cache[size_px] = font
+                    _font_cache[key] = font
                     return font
                 except Exception:
                     pass
@@ -1639,14 +1653,12 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
             font = PILFont.load_default(size=size_px)
         except TypeError:
             font = PILFont.load_default()
-        _font_cache[size_px] = font
+        _font_cache[key] = font
         return font
 
     def _safe_rgb(fill) -> tuple | None:
-        """Return (r,g,b) from a fill object, or None if unavailable."""
+        """Return (r,g,b) from a python-pptx fill object, or None."""
         try:
-            from pptx.enum.dml import MSO_FILL
-            # BACKGROUND(5) and NONE have no fore_color
             if fill.type is None or fill.type.name in ("BACKGROUND", "NONE"):
                 return None
             c = fill.fore_color.rgb
@@ -1654,25 +1666,149 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
         except Exception:
             return None
 
+    def _xml_srgb(elem) -> tuple | None:
+        """Parse <a:solidFill><a:srgbClr val="RRGGBB"/> from an lxml element."""
+        if elem is None:
+            return None
+        try:
+            sf = elem.find(_qn("a:solidFill"))
+            if sf is not None:
+                srgb = sf.find(_qn("a:srgbClr"))
+                if srgb is not None:
+                    val = srgb.get("val", "")
+                    if len(val) == 6:
+                        return (int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+            # schemeClr — return None to let caller fall back to white default
+            # (we cannot resolve theme without full theme XML parsing)
+        except Exception:
+            pass
+        return None
+
+    def _run_color_xml(run) -> tuple | None:
+        """Extract fill color from run XML <a:rPr><a:solidFill>. Returns None if not found."""
+        try:
+            rPr = run._r.find(_qn("a:rPr"))
+            return _xml_srgb(rPr)
+        except Exception:
+            return None
+
+    def _para_color_xml(para) -> tuple | None:
+        """Extract color from paragraph XML <a:pPr><a:defRPr><a:solidFill>."""
+        try:
+            pPr = para._p.find(_qn("a:pPr"))
+            if pPr is not None:
+                defRPr = pPr.find(_qn("a:defRPr"))
+                return _xml_srgb(defRPr)
+        except Exception:
+            pass
+        return None
+
+    def _run_font_size_pt(run) -> float | None:
+        """Get font size in points from run XML sz attribute (sz is in hundredths of a point)."""
+        try:
+            rPr = run._r.find(_qn("a:rPr"))
+            if rPr is not None:
+                sz = rPr.get("sz")
+                if sz:
+                    return float(sz) / 100.0
+        except Exception:
+            pass
+        # fall back to python-pptx
+        try:
+            s = run.font.size
+            if s:
+                return s.pt
+        except Exception:
+            pass
+        return None
+
+    def _run_is_bold(run) -> bool:
+        """Check bold from run XML rPr b attribute."""
+        try:
+            rPr = run._r.find(_qn("a:rPr"))
+            if rPr is not None:
+                b = rPr.get("b")
+                if b is not None:
+                    return b in ("1", "true")
+        except Exception:
+            pass
+        try:
+            return bool(run.font.bold)
+        except Exception:
+            pass
+        return False
+
+    def _run_has_shadow(run) -> bool:
+        """Check if run has an outerShdw effect."""
+        try:
+            rPr = run._r.find(_qn("a:rPr"))
+            if rPr is not None:
+                effectLst = rPr.find(_qn("a:effectLst"))
+                if effectLst is not None:
+                    return effectLst.find(_qn("a:outerShdw")) is not None
+        except Exception:
+            pass
+        return False
+
+    def _para_align(para) -> str:
+        """Return paragraph alignment: 'l', 'c', 'r', or 'j'. Default 'l'."""
+        try:
+            pPr = para._p.find(_qn("a:pPr"))
+            if pPr is not None:
+                algn = pPr.get("algn", "l")
+                return algn  # 'ctr' → centered, 'r' → right, 'l' → left
+        except Exception:
+            pass
+        return "l"
+
+    def _para_line_spacing(para) -> float:
+        """Return line spacing multiplier (e.g. 1.5 for 150%). Default 1.15."""
+        try:
+            pPr = para._p.find(_qn("a:pPr"))
+            if pPr is not None:
+                lnSpc = pPr.find(_qn("a:lnSpc"))
+                if lnSpc is not None:
+                    spcPct = lnSpc.find(_qn("a:spcPct"))
+                    if spcPct is not None:
+                        val = spcPct.get("val", "115000")
+                        return float(val) / 100000.0
+        except Exception:
+            pass
+        return 1.15
+
+    def _para_space_before_pt(para) -> float:
+        """Return space-before in pt. Default 0."""
+        try:
+            pPr = para._p.find(_qn("a:pPr"))
+            if pPr is not None:
+                spcBef = pPr.find(_qn("a:spcBef"))
+                if spcBef is not None:
+                    spcPts = spcBef.find(_qn("a:spcPts"))
+                    if spcPts is not None:
+                        return float(spcPts.get("val", "0")) / 100.0
+        except Exception:
+            pass
+        return 0.0
+
+    # ── Parse presentation ──────────────────────────────────────────────
     prs       = Presentation(io.BytesIO(pptx_bytes))
     sw_emu    = float(prs.slide_width)
     sh_emu    = float(prs.slide_height)
-    # slide height in points (1 pt = 914400/72 EMU)
-    slide_h_pt = sh_emu / 914400 * 72
+    slide_h_pt = sh_emu / 914400 * 72      # slide height in points
     aspect     = sh_emu / sw_emu if sw_emu else 9 / 16
     height_px  = int(width_px * aspect)
 
-    # Scale EMU → pixels
+    # EMU → pixel helpers
     def ex(emu: float) -> int: return int(emu / sw_emu * width_px)
     def ey(emu: float) -> int: return int(emu / sh_emu * height_px)
-    # Scale font points → pixels relative to canvas height
+    # pt → pixel (relative to canvas height)
     def fpt(pt: float) -> int: return max(6, int(pt / slide_h_pt * height_px))
 
     thumbs: list[str] = []
 
     for slide in prs.slides:
-        # ── Background ──────────────────────────────────────────
-        bg_rgb = (255, 255, 255)  # default white (most slides are white)
+        # ── Slide background colour ─────────────────────────────
+        bg_rgb = (255, 255, 255)
         try:
             bg_color = _safe_rgb(slide.background.fill)
             if bg_color is not None:
@@ -1683,16 +1819,44 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
         img  = PILImage.new("RGB", (width_px, height_px), bg_rgb)
         draw = ImageDraw.Draw(img)
 
-        for shape in slide.shapes:
-            sx = ex(shape.left)
-            sy = ey(shape.top)
-            sw = ex(shape.width)
-            sh = ey(shape.height)
+        # ── Sort shapes: picture shapes first (background images), then others ──
+        # This ensures a full-slide background image is drawn before text shapes.
+        def _shape_sort_key(s):
+            from pptx.enum.shapes import MSO_SHAPE_TYPE
+            try:
+                if s.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    return 0
+            except Exception:
+                pass
+            try:
+                if s.shape_type == 13:   # PICTURE numeric value
+                    return 0
+            except Exception:
+                pass
+            # Also detect via .image attribute
+            try:
+                _ = s.image
+                return 0
+            except Exception:
+                pass
+            return 1 if not getattr(s, "has_text_frame", False) else 2
 
-            # ── Image shapes ──────────────────────────────────
+        sorted_shapes = sorted(slide.shapes, key=_shape_sort_key)
+
+        for shape in sorted_shapes:
+            # Guard against None positions (some group shapes)
+            try:
+                sx = ex(shape.left   or 0)
+                sy = ey(shape.top    or 0)
+                sw = ex(shape.width  or 0)
+                sh_px = ey(shape.height or 0)
+            except Exception:
+                continue
+
+            # ── Image / Picture shapes ────────────────────────
             is_pic = False
             try:
-                _ = shape.image  # raises if not a picture
+                _ = shape.image
                 is_pic = True
             except Exception:
                 pass
@@ -1700,91 +1864,108 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
             if is_pic:
                 try:
                     from PIL import Image as _PIL2
-                    pic = _PIL2.open(io.BytesIO(shape.image.blob))
-                    if sw > 0 and sh > 0:
-                        pic = pic.resize((sw, sh), _PIL2.LANCZOS)
-                        if pic.mode == "RGBA":
-                            bg_patch = _PIL2.new("RGBA", (sw, sh), bg_rgb + (255,))
-                            bg_patch.alpha_composite(pic)
-                            img.paste(bg_patch.convert("RGB"), (sx, sy))
+                    raw = shape.image.blob
+                    pic = _PIL2.open(io.BytesIO(raw))
+                    if sw > 0 and sh_px > 0:
+                        pic = pic.resize((sw, sh_px), _PIL2.LANCZOS)
+                        if pic.mode in ("RGBA", "LA"):
+                            base = _PIL2.new("RGBA", (sw, sh_px), bg_rgb + (255,))
+                            base.alpha_composite(pic.convert("RGBA"))
+                            img.paste(base.convert("RGB"), (sx, sy))
                         else:
                             img.paste(pic.convert("RGB"), (sx, sy))
+                    # Refresh draw context after paste
+                    draw = ImageDraw.Draw(img)
                 except Exception:
                     pass
                 continue
 
             # ── Filled rectangle (non-text, non-image) ────────
-            if not shape.has_text_frame:
+            if not getattr(shape, "has_text_frame", False):
                 try:
                     col = _safe_rgb(shape.fill)
-                    if col is not None and sw > 0 and sh > 0:
-                        draw.rectangle([sx, sy, sx + sw, sy + sh], fill=col)
+                    if col is not None and sw > 0 and sh_px > 0:
+                        draw.rectangle([sx, sy, sx + sw, sy + sh_px], fill=col)
                 except Exception:
                     pass
                 continue
 
             # ── Text frame ────────────────────────────────────
             tf = shape.text_frame
-            # Inherit paragraph/shape-level defaults for font size & colour
-            def _para_font_pt(para) -> float:
-                """Best-effort paragraph-level font size in pt."""
-                try:
-                    s = para.runs[0].font.size
-                    if s:
-                        return s.pt
-                except Exception:
-                    pass
-                try:
-                    s = tf.paragraphs[0].runs[0].font.size
-                    if s:
-                        return s.pt
-                except Exception:
-                    pass
-                return 24.0  # sensible default
 
-            def _run_color(run, para_default=(0, 0, 0)) -> tuple:
-                try:
-                    c = run.font.color.rgb
-                    return (c.red, c.green, c.blue)
-                except Exception:
-                    pass
-                # fall back to theme colour luminance
-                try:
-                    from pptx.dml.color import _Colormap
-                    pass
-                except Exception:
-                    pass
-                return para_default
+            # Default pt for paragraphs without explicit size
+            def _default_pt(para) -> float:
+                for r in para.runs:
+                    pt = _run_font_size_pt(r)
+                    if pt:
+                        return pt
+                return 24.0
 
             line_y = sy
             for para in tf.paragraphs:
-                # Collect runs (preserve spaces between runs)
                 runs = [(r.text, r) for r in para.runs if r.text]
+
+                # Space-before
+                sb_pt = _para_space_before_pt(para)
+                if sb_pt > 0:
+                    line_y += fpt(sb_pt)
+
                 if not runs:
-                    # empty para = line spacing
-                    def_pt = _para_font_pt(para)
-                    line_y += fpt(def_pt * 1.2)
+                    def_pt = _default_pt(para)
+                    line_y += fpt(def_pt * _para_line_spacing(para))
                     continue
 
-                max_h = 0
-                run_x = sx
+                align  = _para_align(para)          # 'l', 'ctr', 'r', 'j'
+                lsp    = _para_line_spacing(para)
+                max_h  = 0
+
+                # First pass: measure total line width for alignment
+                total_w = 0
+                run_metrics = []
                 for text, run in runs:
+                    pt   = _run_font_size_pt(run) or _default_pt(para)
+                    px   = fpt(pt)
+                    bold = _run_is_bold(run)
+                    font_obj = _get_font(px, bold)
+                    col  = (_run_color_xml(run)
+                            or _para_color_xml(para)
+                            or (255, 255, 255))   # default white on image backgrounds
+                    has_shd = _run_has_shadow(run)
                     try:
-                        pt = run.font.size.pt if run.font.size else _para_font_pt(para)
+                        bb = draw.textbbox((0, 0), text, font=font_obj)
+                        tw = bb[2] - bb[0]
+                        th = bb[3] - bb[1]
                     except Exception:
-                        pt = _para_font_pt(para)
-                    px = fpt(pt)
-                    col = _run_color(run)
-                    font_obj = _get_font(px)
+                        tw = px * len(text) // 2
+                        th = px
+                    run_metrics.append((text, font_obj, col, has_shd, tw, th))
+                    total_w += tw
+                    max_h = max(max_h, th)
+
+                # Compute start x based on alignment
+                if align == "ctr":
+                    run_x = sx + max(0, (sw - total_w) // 2)
+                elif align == "r":
+                    run_x = sx + max(0, sw - total_w)
+                else:
+                    run_x = sx  # left / justified
+
+                # Second pass: draw
+                for text, font_obj, col, has_shd, tw, th in run_metrics:
+                    # Drop shadow (simulate outerShdw: black offset 1-2px bottom-right)
+                    if has_shd:
+                        shadow_col = (0, 0, 0, 80)   # semi-transparent black
+                        # Draw shadow on RGBA layer then composite
+                        try:
+                            shdw_offset = max(1, fpt(0.5))
+                            draw.text((run_x + shdw_offset, line_y + shdw_offset),
+                                      text, font=font_obj, fill=(0, 0, 0))
+                        except Exception:
+                            pass
                     draw.text((run_x, line_y), text, font=font_obj, fill=col)
-                    try:
-                        bb = draw.textbbox((run_x, line_y), text, font=font_obj)
-                        run_x = bb[2]
-                        max_h = max(max_h, bb[3] - bb[1])
-                    except Exception:
-                        run_x += px * len(text) // 2
-                        max_h = max(max_h, px)
-                line_y += max_h + max(2, int(max_h * 0.15))
+                    run_x += tw
+
+                line_y += int(max_h * lsp) + max(1, int(max_h * 0.05))
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
