@@ -14,9 +14,16 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, UploadFile
+import requests
+from fastapi import FastAPI, File, Form, UploadFile, Request, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+
+"""
+Bible Reader: an embedded iframe of wordproject.org (Khmer Bible) loaded via a
+same-origin proxy so text selections can be captured and piped into the slide
+editor automatically.
+"""
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -94,9 +101,105 @@ ALIGN_MAP = {
 }
 
 # ── Verse number pattern: Arabic digits OR Khmer digits at line start
-# Matches: "12 ..."  or  "១២ ..."  (one or more digits, then whitespace, then content)
+# Matches: "12 ...", "12. ...", "12) ...", "[12] ...", "១២ ..."
 _NUM_PAT = r"[0-9០-៩]+"
-KHMER_VERSE_RE = re.compile(rf"^({_NUM_PAT})\s+(.+)$", re.MULTILINE)
+KHMER_VERSE_RE = re.compile(rf"^\[?({_NUM_PAT})\]?(?:[\.\:\)\-]\s*|\s+)(.+)$")
+
+KHMER_DIGITS = "០១២៣៤៥៦៧៨៩"
+ARABIC_TO_KHMER = str.maketrans("0123456789", KHMER_DIGITS)
+
+
+def to_khmer_number(num_str: str) -> str:
+    """Convert any Arabic digits in a verse number string to Khmer digits (e.g. '12' -> '១២')."""
+    if not num_str:
+        return ""
+    return str(num_str).translate(ARABIC_TO_KHMER)
+
+
+def get_slide_char_limit(settings: SlideSettings | None) -> int:
+    """
+    Calculate the character capacity to make a slide genuinely full before
+    spilling over to a continuation slide.
+    A full widescreen slide holds ~195-220 characters at 60pt font,
+    and ~260-320 characters at 36pt font.
+    """
+    if not settings:
+        return 200
+    base = 200.0 * (60.0 / max(settings.font_size, 16)) ** 0.5
+    base = base * (1.5 / max(settings.line_spacing, 0.8)) ** 0.3
+    pad_factor = (13.33 - 2 * min(settings.padding, 1.5)) / (13.33 - 2 * 0.1)
+    base = base * pad_factor
+    return max(150, int(base))
+
+
+def split_khmer_text_for_slides(text: str, max_chars: int = 200) -> list[str]:
+    """
+    Split a long Khmer text across slides.
+    Ensures that the first slide is filled FULL first (taking as much text as fits),
+    and only the remaining overflow text is cut into the next slide.
+    """
+    text = text.strip()
+    if not text or len(text) <= max_chars:
+        return [text] if text else []
+
+    boundaries = []
+    # 1. Punctuation (highest priority for clean breaks)
+    for m in re.finditer(r'[។៕?!;,\n]', text):
+        boundaries.append((m.end(), 10))
+    # 2. Whitespace / spaces between clauses
+    for m in re.finditer(r'\s+', text):
+        boundaries.append((m.start(), 8))
+    # 3. Zero-width space (\u200b)
+    for m in re.finditer(r'\u200b', text):
+        boundaries.append((m.end(), 5))
+
+    boundaries.sort(key=lambda x: x[0])
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        remaining = len(text) - start
+        if remaining <= max_chars:
+            chunks.append(text[start:].strip(' \t\n\u200b'))
+            break
+
+        max_p = start + max_chars
+        # To make the first slide full first, search for a natural boundary
+        # in the upper range [start + 65% of max_chars, max_p]
+        upper_min = start + int(max_chars * 0.65)
+        cands = [b for b in boundaries if upper_min <= b[0] <= max_p]
+
+        if cands:
+            # Pick candidates near the maximum boundary to fill the slide as much as possible
+            furthest_pos = max(b[0] for b in cands)
+            near_top = [b for b in cands if b[0] >= furthest_pos - 35]
+            near_top.sort(key=lambda b: (b[1], b[0]), reverse=True)
+            split_at = near_top[0][0]
+        else:
+            # If no boundary in upper 35%, search in [start + 45%, max_p]
+            mid_min = start + int(max_chars * 0.45)
+            mid_cands = [b for b in boundaries if mid_min <= b[0] <= max_p]
+            if mid_cands:
+                furthest_pos = max(b[0] for b in mid_cands)
+                near_top = [b for b in mid_cands if b[0] >= furthest_pos - 35]
+                near_top.sort(key=lambda b: (b[1], b[0]), reverse=True)
+                split_at = near_top[0][0]
+            else:
+                # Look slightly ahead if a space/punct is just past max_chars (within 15 chars)
+                ahead = [b for b in boundaries if max_p < b[0] <= max_p + 15 and b[1] >= 8]
+                if ahead:
+                    split_at = ahead[0][0]
+                else:
+                    fallback = [b for b in boundaries if start + 20 <= b[0] <= max_p]
+                    split_at = fallback[-1][0] if fallback else max_p
+
+        chunk = text[start:split_at].strip(' \t\n\u200b')
+        if chunk:
+            chunks.append(chunk)
+        start = split_at
+
+    return [c for c in chunks if c]
+
 
 # ── English reference blocks: "John 3:16\nbody…"
 VERSE_REF_RE = re.compile(
@@ -116,25 +219,43 @@ VERSE_REF_RE = re.compile(
 def parse_verses(raw_text: str) -> list[dict]:
     """
     Returns list of {ref, verse_num, lines}.
+    Verse numbers are always converted to Khmer digits (e.g. '12' -> '១២').
 
     Detection priority:
-      1. Khmer-style leading verse numbers  ("12 ដំ...")
-      2. English reference headers          ("John 3:16\\nbody")
+      1. Khmer-style leading verse numbers ("12 ដំ...", "12. ...", "12) ...", "១២ ...")
+      2. English reference headers         ("John 3:16\\nbody")
       3. Blank-line block fallback
     """
     raw_text = raw_text.strip()
     if not raw_text:
         return []
 
-    # Strategy 1 — Khmer numbered lines
-    khmer_matches = list(KHMER_VERSE_RE.finditer(raw_text))
+    # Strategy 1 — Khmer / numbered lines
+    # Detects lines starting with verse numbers (Arabic or Khmer digits)
+    lines_with_numbers = [l for l in raw_text.splitlines() if l.strip() and KHMER_VERSE_RE.match(l.strip())]
     non_blank = [l for l in raw_text.splitlines() if l.strip()]
-    if khmer_matches and len(khmer_matches) / max(len(non_blank), 1) >= 0.5:
-        verses = []
-        for m in khmer_matches:
-            body = m.group(2).strip()
-            if body:
-                verses.append({"ref": "", "verse_num": m.group(1), "lines": [body]})
+
+    if lines_with_numbers and len(lines_with_numbers) / max(len(non_blank), 1) >= 0.20:
+        verses: list[dict] = []
+        curr: dict | None = None
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            m = KHMER_VERSE_RE.match(line)
+            if m:
+                curr = {
+                    "ref": "",
+                    "verse_num": to_khmer_number(m.group(1)),
+                    "lines": [m.group(2).strip()],
+                }
+                verses.append(curr)
+            elif curr:
+                # Continuation of the current verse: join with space so it's a unified verse text
+                curr["lines"][-1] = (curr["lines"][-1] + " " + line).strip()
+            else:
+                curr = {"ref": "", "verse_num": "", "lines": [line]}
+                verses.append(curr)
         if verses:
             return verses
 
@@ -155,7 +276,20 @@ def parse_verses(raw_text: str) -> list[dict]:
         block = block.strip()
         if not block:
             continue
-        verses.append({"ref": "", "verse_num": "", "lines": [l.strip() for l in block.splitlines() if l.strip()]})
+        b_lines = [l.strip() for l in block.splitlines() if l.strip()]
+        if not b_lines:
+            continue
+        # Check if first line in block has a verse number
+        m = KHMER_VERSE_RE.match(b_lines[0])
+        if m:
+            v_num = to_khmer_number(m.group(1))
+            first_line = m.group(2).strip()
+            # If there are subsequent lines in this block, join them with space
+            rest_text = " ".join(b_lines[1:])
+            full_text = (first_line + " " + rest_text).strip() if rest_text else first_line
+            verses.append({"ref": "", "verse_num": v_num, "lines": [full_text]})
+        else:
+            verses.append({"ref": "", "verse_num": "", "lines": b_lines})
     return verses
 
 
@@ -168,19 +302,51 @@ def build_slides(
     per_slide: int,
     global_ref: str,
     show_ref_each: bool,
+    settings: SlideSettings | None = None,
 ) -> list[SlidePart]:
+    """
+    Build slides from verses.
+    - Standard verses each fit cleanly on their own slide.
+    - Verse numbers are always rendered in Khmer numerals ('១', '២', '១២').
+    - Only truly long verses that genuinely overflow the whole slide page (> char_limit)
+      are cut into multiple slides representing that verse.
+    """
+    char_limit = get_slide_char_limit(settings)
     slides: list[SlidePart] = []
+
     for v in verses:
         ref = v.get("ref") or global_ref
-        verse_num = v.get("verse_num", "")
-        groups = _chunk(v["lines"], per_slide)
-        for i, group in enumerate(groups):
-            show = show_ref_each or i == len(groups) - 1
+        verse_num = to_khmer_number(v.get("verse_num", ""))
+        raw_lines = [l.strip() for l in v.get("lines", []) if l.strip()]
+        if not raw_lines:
+            continue
+
+        # Combine lines of this verse to measure total verse length
+        full_verse_text = " ".join(raw_lines)
+
+        # Check if the verse genuinely overflows the whole slide
+        if len(full_verse_text) > char_limit:
+            # Genuinely overflows the slide page -> cut into balanced slide chunks
+            chunks = split_khmer_text_for_slides(full_verse_text, max_chars=char_limit)
+            total_chunks = len(chunks)
+            for i, chunk in enumerate(chunks):
+                show = show_ref_each or (i == total_chunks - 1)
+                # First slide gets the verse_num; subsequent continuation slides (e.g. second slide)
+                # have no verse number (empty string), putting only the remaining text.
+                slide_vnum = verse_num if i == 0 else ""
+                slides.append(SlidePart(
+                    verse_num=slide_vnum,
+                    lines=[chunk],
+                    ref=ref if show else "",
+                ))
+        else:
+            # Fits on a single slide cleanly!
             slides.append(SlidePart(
                 verse_num=verse_num,
-                lines=group,
-                ref=ref if show else "",
+                lines=[full_verse_text],
+                ref=ref,
             ))
+
     return slides
 
 
@@ -331,7 +497,13 @@ def health():
 @app.post("/api/preview")
 def preview(req: PreviewRequest):
     verses = parse_verses(req.raw_text)
-    slides = build_slides(verses, req.per_slide, req.reference, req.settings.show_ref_each)
+    slides = build_slides(
+        verses,
+        req.per_slide,
+        req.reference,
+        req.settings.show_ref_each,
+        settings=req.settings,
+    )
     return {"slides": [s.model_dump() for s in slides], "total": len(slides)}
 
 
@@ -340,7 +512,13 @@ def generate(req: GenerateRequest):
     verses = parse_verses(req.raw_text)
     if not verses:
         verses = [{"ref": req.reference or "", "verse_num": "", "lines": ["(No content)"]}]
-    slides = build_slides(verses, req.per_slide, req.reference, req.settings.show_ref_each)
+    slides = build_slides(
+        verses,
+        req.per_slide,
+        req.reference,
+        req.settings.show_ref_each,
+        settings=req.settings,
+    )
     pptx_bytes = build_pptx(slides, req.settings)
     filename = f"bible_slides_{uuid.uuid4().hex[:8]}.pptx"
     return StreamingResponse(
@@ -1855,6 +2033,211 @@ async def merge_generate(
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Bible Reader Proxy (same-origin iframe for wordproject.org)
+# ═══════════════════════════════════════════════════════════════════
+
+# Browsers block cross-origin iframe JS, so we serve wordproject.org through
+# a high-performance same-origin proxy and inject a script that forwards the
+# user's selection to the parent app (the Bible Text input).
+
+import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+_BIBLE_PROXY_BASE = "https://www.wordproject.org"
+
+# Reusable connection pool to wordproject.org for fast keep-alive requests
+_proxy_session = requests.Session()
+_proxy_adapter = HTTPAdapter(
+    pool_connections=25,
+    pool_maxsize=50,
+    max_retries=Retry(total=2, backoff_factor=0.1, status_forcelist=[502, 503, 504]),
+)
+_proxy_session.mount("https://", _proxy_adapter)
+_proxy_session.mount("http://", _proxy_adapter)
+
+# In-memory asset cache: url -> (content_bytes, media_type, headers_dict, expires_at)
+_PROXY_CACHE: dict[str, tuple[bytes, str, dict[str, str], float]] = {}
+_MAX_PROXY_CACHE_ENTRIES = 600
+
+_STATIC_EXTENSIONS = (
+    ".css", ".js", ".ttf", ".woff", ".woff2", ".eot", ".otf",
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp",
+)
+
+# Selection bridge: injected into every proxied page.
+# Only captures and puts text into the slide input when the user RELEASES the mouse
+# (removes hold of mouse). While the user is dragging / holding the mouse down,
+# it never prematurely captures or adds partial text.
+_SELECTION_SCRIPT = b"""
+<script>
+(function () {
+  // Fix wordproject.org script bug on pages without #textBody
+  try {
+    if (window.$) {
+      $(function () {
+        if (!$('#textBody').length) {
+          $('<div id="textBody" style="display:none"></div>').appendTo('body');
+        }
+        if (!$('#fadeout').length) {
+          $('<div id="fadeout" style="display:none"></div>').appendTo('body');
+        }
+      });
+    }
+  } catch (e) {}
+
+  var isPointerDown = false;
+  var currentSelectedText = '';
+  var hasActiveSelection = false;
+
+  function onPointerDown() {
+    isPointerDown = true;
+  }
+
+  function onPointerUp() {
+    isPointerDown = false;
+    // Wait for the browser selection to settle after mouseup
+    setTimeout(finishSelection, 40);
+  }
+
+  function finishSelection() {
+    // If user is still holding the mouse down, do NOT capture yet!
+    if (isPointerDown) {
+      return;
+    }
+
+    var sel = window.getSelection();
+    var text = sel ? sel.toString().trim() : '';
+
+    if (!text) {
+      // User cleared the selection / unselected
+      if (hasActiveSelection) {
+        hasActiveSelection = false;
+        currentSelectedText = '';
+        try {
+          parent.postMessage({ source: 'wordproject-proxy', type: 'deselection' }, '*');
+        } catch (e) {}
+      }
+      return;
+    }
+
+    // If identical to active selection, do not re-send (prevents duplicate)
+    if (text === currentSelectedText) {
+      return;
+    }
+
+    // User finished dragging and released hold of mouse -> capture complete text!
+    currentSelectedText = text;
+    hasActiveSelection = true;
+    try {
+      parent.postMessage({ source: 'wordproject-proxy', type: 'selection', text: text }, '*');
+    } catch (e) {}
+  }
+
+  // Pointer down: mark as holding mouse
+  document.addEventListener('mousedown', onPointerDown, true);
+  document.addEventListener('pointerdown', onPointerDown, true);
+  document.addEventListener('touchstart', onPointerDown, true);
+
+  // Pointer up: mouse hold released -> now capture!
+  document.addEventListener('mouseup', onPointerUp, true);
+  document.addEventListener('pointerup', onPointerUp, true);
+  document.addEventListener('touchend', onPointerUp, true);
+
+  // Keyboard selection (Shift + Arrow keys)
+  document.addEventListener('keyup', function (e) {
+    if (e.key === 'Shift' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      setTimeout(finishSelection, 50);
+    }
+  });
+
+  // Selectionchange guard: NEVER fire while mouse is held down
+  document.addEventListener('selectionchange', function () {
+    if (isPointerDown) {
+      return;
+    }
+    clearTimeout(finishSelection._t);
+    finishSelection._t = setTimeout(finishSelection, 150);
+  });
+})();
+</script>
+"""
+
+
+def _proxy_html(html: bytes) -> bytes:
+    """Insert the selection bridge before </body> (or append if absent)."""
+    low = html.lower()
+    idx = low.rfind(b"</body>")
+    if idx == -1:
+        return html + _SELECTION_SCRIPT
+    return html[:idx] + _SELECTION_SCRIPT + html[idx:]
+
+
+@app.get("/api/bible-proxy/{path:path}")
+def bible_proxy(path: str, request: Request):
+    """
+    High-performance proxy for wordproject.org.
+    - Synchronous def so FastAPI dispatches to threadpool for true parallel downloads.
+    - Keep-alive connection pooling via requests.Session.
+    - In-memory caching for static assets (fonts, css, js, images) and HTML.
+    - Browser Cache-Control headers for instant local loading.
+    """
+    url = f"{_BIBLE_PROXY_BASE}/{path}"
+    query = request.url.query
+    if query:
+        url += f"?{query}"
+
+    now = time.time()
+    is_static = any(path.lower().endswith(ext) for ext in _STATIC_EXTENSIONS)
+
+    # Check in-memory cache
+    if url in _PROXY_CACHE:
+        cached_content, cached_media_type, cached_headers, expires_at = _PROXY_CACHE[url]
+        if now < expires_at:
+            return Response(content=cached_content, media_type=cached_media_type, headers=cached_headers)
+
+    try:
+        resp = _proxy_session.get(
+            url,
+            timeout=25,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.wordproject.org/",
+                "Accept-Encoding": "gzip, deflate",
+            },
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach wordproject.org")
+
+    if resp.status_code != 200:
+        return Response(content=resp.content, status_code=resp.status_code)
+
+    content_type = resp.headers.get("content-type", "application/octet-stream")
+    body = resp.content
+
+    if "text/html" in content_type:
+        body = _proxy_html(body)
+        headers = {
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        }
+        ttl = 3600  # 1 hour cache for HTML
+    else:
+        headers = {
+            "Cache-Control": "public, max-age=604800, immutable" if is_static else "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        }
+        ttl = 604800 if is_static else 3600
+
+    # Cache response in memory
+    if len(_PROXY_CACHE) > _MAX_PROXY_CACHE_ENTRIES:
+        _PROXY_CACHE.clear()
+    _PROXY_CACHE[url] = (body, content_type, headers, now + ttl)
+
+    return Response(content=body, media_type=content_type, headers=headers)
 
 
 # ── Static frontend (Vite build) ─────────────────────────────────
