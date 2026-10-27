@@ -1201,10 +1201,12 @@ class SongSettings(BaseModel):
     align:          str   = "center"
     line_spacing:   float = Field(1.5, ge=0.5, le=4.0)
     verse_spacing:  float = Field(1.0, ge=0.0, le=3.0)   # extra space between verse groups
-    bg_color:       str   = "#000000"
-    text_color:     str   = "#ffffff"
-    ref_color:      str   = "#aaaaaa"
+    bg_color:       str   = "#ffffff"
+    text_color:     str   = "#000000"
+    ref_color:      str   = "#555555"
     ref_font_size:  int   = Field(22, ge=8, le=72)
+    verse_num_color: str  = "#ffcc44"
+    chorus_r_color:  str  = "#ef4444"
     padding:        float = Field(0.45, ge=0.05, le=2.0)
     lines_per_slide: int  = Field(2, ge=1, le=10)
 
@@ -1221,6 +1223,117 @@ class SongPreviewRequest(BaseModel):
     song_title:  str = ""
 
 
+def parse_song_lyrics(raw_text: str) -> list[dict]:
+    """
+    Parses hymn / song lyrics into structured slides:
+    1. Title Slide: title, subtitle (e.g. Korean / English), category (e.g. HYMN)
+    2. Verse Slides: numbered 1, 2, 3... (converted to Khmer numbers: ១, ២, ៣)
+    3. Chorus Slides: 'បន្ទរ' / 'Chorus' replaced by 'R.' in red color.
+    """
+    raw_text = raw_text.strip()
+    if not raw_text:
+        return []
+
+    lines = raw_text.splitlines()
+
+    # Detect verse markers: e.g. '១~', '1~', '១.', '1.', '2.', '២.'
+    VERSE_START_RE = re.compile(r'(?:^|\s+)([0-9០-៩]+)\s*[\~\.\:\-\)]')
+    CHORUS_RE = re.compile(r'(?:បន្ទរ\s*[\:\៖]?|Chorus\s*[\:\៖]?)')
+
+    has_verse_marker = any(VERSE_START_RE.search(l) for l in lines)
+    has_chorus_marker = any(CHORUS_RE.search(l) for l in lines)
+
+    # Hymn structure with markers
+    if has_verse_marker or has_chorus_marker:
+        body_start_line = len(lines)
+        for i, line in enumerate(lines):
+            if VERSE_START_RE.search(line.strip()):
+                body_start_line = i
+                break
+
+        header_lines = [l.strip() for l in lines[:body_start_line] if l.strip()]
+        body_text = ' '.join(lines[body_start_line:]).strip()
+
+        slides = []
+
+        # 1. Title slide
+        if header_lines:
+            title = header_lines[0]
+            subtitle = header_lines[1] if len(header_lines) > 1 else ''
+            category = ' '.join(header_lines[2:]) if len(header_lines) > 2 else ''
+            slides.append({
+                'is_title': True,
+                'title': title,
+                'subtitle': subtitle,
+                'category': category,
+                'prefix': '',
+                'prefix_color': '',
+                'lines': [title] + ([subtitle] if subtitle else []) + ([category] if category else []),
+            })
+
+        if body_text:
+            MARKER_RE = re.compile(
+                r'(?:(?:^|\s+)(?P<verse>[0-9០-៩]+)\s*[\~\.\:\-\)]\s*)|(?:(?:^|\s+)(?P<chorus>បន្ទរ\s*[\:\៖]?|Chorus\s*[\:\៖]?)\s*)'
+            )
+            matches = list(MARKER_RE.finditer(body_text))
+            if matches:
+                for idx, m in enumerate(matches):
+                    start = m.end()
+                    end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body_text)
+                    content = body_text[start:end].strip()
+                    if not content:
+                        continue
+                    if m.group('verse'):
+                        v_num = to_khmer_number(m.group('verse'))
+                        slides.append({
+                            'is_title': False,
+                            'title': '',
+                            'subtitle': '',
+                            'category': '',
+                            'prefix': v_num,
+                            'prefix_color': 'verse',
+                            'lines': [content],
+                        })
+                    elif m.group('chorus'):
+                        slides.append({
+                            'is_title': False,
+                            'title': '',
+                            'subtitle': '',
+                            'category': '',
+                            'prefix': 'R.',
+                            'prefix_color': 'red',
+                            'lines': [content],
+                        })
+            else:
+                slides.append({
+                    'is_title': False,
+                    'title': '',
+                    'subtitle': '',
+                    'category': '',
+                    'prefix': '',
+                    'prefix_color': '',
+                    'lines': [body_text],
+                })
+        return slides
+
+    # Fallback: plain lyrics
+    slides = []
+    blocks = re.split(r'\n\s*\n', raw_text)
+    for block in blocks:
+        b_lines = [l.strip() for l in block.splitlines() if l.strip()]
+        if b_lines:
+            slides.append({
+                'is_title': False,
+                'title': '',
+                'subtitle': '',
+                'category': '',
+                'prefix': '',
+                'prefix_color': '',
+                'lines': b_lines,
+            })
+    return slides
+
+
 def _build_song_pptx(lyrics_text: str, s: SongSettings, song_title: str = "") -> bytes:
     prs = Presentation()
     prs.slide_width  = Inches(13.33)
@@ -1230,43 +1343,106 @@ def _build_song_pptx(lyrics_text: str, s: SongSettings, song_title: str = "") ->
     text_rgb = _hex_to_rgb(s.text_color)
     ref_rgb  = _hex_to_rgb(s.ref_color)
     bg_rgb   = _hex_to_rgb(s.bg_color)
+    red_rgb  = (239, 68, 68)  # Red for chorus 'R.'
+    vnum_rgb = _hex_to_rgb(getattr(s, 'verse_num_color', '#ffcc44'))
 
     pad = Inches(s.padding)
     sw  = prs.slide_width
     sh  = prs.slide_height
 
-    all_lines = [ln for ln in lyrics_text.splitlines() if ln.strip()]
-    if not all_lines:
-        all_lines = ["(no lyrics found)"]
+    slides_data = parse_song_lyrics(lyrics_text)
+    if not slides_data:
+        slides_data = [{'is_title': False, 'prefix': '', 'prefix_color': '', 'lines': ['(no lyrics found)']}]
 
-    groups = [all_lines[i: i + s.lines_per_slide]
-              for i in range(0, len(all_lines), s.lines_per_slide)]
+    if not song_title and slides_data and slides_data[0].get('is_title'):
+        song_title = slides_data[0].get('title', '')
 
-    for g_idx, group in enumerate(groups):
+    for s_idx, sd in enumerate(slides_data):
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         bg_fill = slide.background.fill
         bg_fill.solid()
         bg_fill.fore_color.rgb = RGBColor(*bg_rgb)
 
-        body_h = sh - pad * 2 - (Inches(0.7) if song_title else Inches(0.1))
+        if sd.get('is_title'):
+            # ── Beautiful Centered Title Slide ──
+            body_w = sw - pad * 2
+            body_h = Inches(4.5)
+            top_pos = (sh - body_h) / 2
+            txBox = slide.shapes.add_textbox(int(pad), int(top_pos), int(body_w), int(body_h))
+            tf = txBox.text_frame
+            tf.word_wrap = True
+
+            # Title
+            p0 = tf.paragraphs[0]
+            p0.alignment = PP_ALIGN.CENTER
+            _set_line_spacing(p0, 1.2)
+            run_title = p0.add_run()
+            run_title.text = sd.get('title', '')
+            run_title.font.size = Pt(min(s.font_size + 6, 72))
+            run_title.font.bold = True
+            run_title.font.color.rgb = RGBColor(*text_rgb)
+            _fix_font(run_title, s.font_family)
+
+            # Subtitle (Korean / English / etc.)
+            if sd.get('subtitle'):
+                p1 = tf.add_paragraph()
+                p1.alignment = PP_ALIGN.CENTER
+                _set_line_spacing(p1, 1.2)
+                run_sub = p1.add_run()
+                run_sub.text = sd.get('subtitle', '')
+                run_sub.font.size = Pt(max(s.font_size - 14, 20))
+                run_sub.font.color.rgb = RGBColor(*ref_rgb)
+                _fix_font(run_sub, s.font_family)
+
+            # Category / tag (e.g. HYMN)
+            if sd.get('category'):
+                p2 = tf.add_paragraph()
+                p2.alignment = PP_ALIGN.CENTER
+                _set_line_spacing(p2, 1.2)
+                run_cat = p2.add_run()
+                run_cat.text = sd.get('category', '')
+                run_cat.font.size = Pt(max(s.font_size - 22, 16))
+                run_cat.font.bold = True
+                run_cat.font.color.rgb = RGBColor(91, 80, 232)
+                _fix_font(run_cat, s.font_family)
+            continue
+
+        # ── Verse or Chorus Slide ──
+        body_h = sh - pad * 2 - (Inches(0.65) if song_title else Inches(0.1))
         txBox  = slide.shapes.add_textbox(int(pad), int(pad), int(sw - pad * 2), int(body_h))
         tf     = txBox.text_frame
         tf.word_wrap = True
 
-        for i, line in enumerate(group):
+        prefix = sd.get('prefix', '')
+        prefix_color = sd.get('prefix_color', '')
+
+        for i, line in enumerate(sd.get('lines', [])):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.alignment = align
             _set_line_spacing(p, s.line_spacing)
 
+            # Prefix run (only on first line)
+            if i == 0 and prefix:
+                pre_run = p.add_run()
+                pre_run.text = prefix + "  "
+                pre_run.font.size = Pt(s.font_size)
+                pre_run.font.bold = True
+                # Red for chorus 'R.', verse_num_color for verses
+                if prefix == 'R.' or prefix_color == 'red':
+                    pre_run.font.color.rgb = RGBColor(*red_rgb)
+                else:
+                    pre_run.font.color.rgb = RGBColor(*vnum_rgb)
+                _fix_font(pre_run, s.font_family)
+
             run = p.add_run()
             run.text = line
-            run.font.size  = Pt(s.font_size)
-            run.font.bold  = s.bold
+            run.font.size = Pt(s.font_size)
+            run.font.bold = s.bold
             run.font.color.rgb = RGBColor(*text_rgb)
             _fix_font(run, s.font_family)
 
         # Song title / reference at bottom-right
-        if song_title:
+        if song_title and s_idx > 0:
             _add_textbox(
                 slide, [song_title],
                 pad, sh - Inches(0.65),
@@ -1282,6 +1458,12 @@ def _build_song_pptx(lyrics_text: str, s: SongSettings, song_title: str = "") ->
     # Embed Khmer font if applicable
     pptx_bytes = buf.read()
     ttf_filename = FONT_FILE_MAP.get(s.font_family)
+    if ttf_filename:
+        ttf_path = FONT_DIR / ttf_filename
+        if ttf_path.exists():
+            pptx_bytes = _embed_font(pptx_bytes, s.font_family, ttf_filename, ttf_path.read_bytes())
+
+    return pptx_bytes
     if ttf_filename:
         ttf_path = FONT_DIR / ttf_filename
         if ttf_path.exists():
@@ -1356,12 +1538,16 @@ def _embed_font(pptx_bytes: bytes, font_name: str, ttf_filename: str, font_data:
 
 
 def _build_song_preview_slides(lyrics_text: str, s: SongSettings, song_title: str) -> list[dict]:
-    all_lines = [ln for ln in lyrics_text.splitlines() if ln.strip()]
-    if not all_lines:
-        return [{"lines": ["(no lyrics)"], "title": song_title}]
-    groups = [all_lines[i: i + s.lines_per_slide]
-              for i in range(0, len(all_lines), s.lines_per_slide)]
-    return [{"lines": g, "title": song_title if i == len(groups) - 1 else ""} for i, g in enumerate(groups)]
+    slides = parse_song_lyrics(lyrics_text)
+    if not slides:
+        return [{"is_title": False, "prefix": "", "prefix_color": "", "lines": ["(no lyrics)"], "title": song_title}]
+
+    # In preview, attach title/reference to slides
+    first_title = slides[0].get("title", "") if (slides and slides[0].get("is_title")) else song_title
+    for i, s_item in enumerate(slides):
+        if not s_item.get("is_title"):
+            s_item["title"] = song_title or first_title
+    return slides
 
 
 # ── Song OCR endpoint ────────────────────────────────────────────

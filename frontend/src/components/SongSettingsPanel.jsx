@@ -115,6 +115,16 @@ export default function SongSettingsPanel({ settings, onChange }) {
           onChange={v => set('text_color', v)}
         />
         <ColorPicker
+          label="Verse Number Color"
+          value={settings.verse_num_color || '#ffcc44'}
+          onChange={v => set('verse_num_color', v)}
+        />
+        <ColorPicker
+          label="Chorus 'R.' Color"
+          value={settings.chorus_r_color || '#ef4444'}
+          onChange={v => set('chorus_r_color', v)}
+        />
+        <ColorPicker
           label="Song Title Color"
           value={settings.ref_color}
           onChange={v => set('ref_color', v)}

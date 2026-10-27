@@ -22,8 +22,10 @@ export const DEFAULT_SONG_SETTINGS = {
   verse_spacing:   1.0,
   bg_color:        '#ffffff',
   text_color:      '#000000',
-  ref_color:       '#aaaaaa',
+  ref_color:       '#555555',
   ref_font_size:   22,
+  verse_num_color: '#ffcc44',
+  chorus_r_color:  '#ef4444',
   padding:         0.1,
   lines_per_slide: 2,
 }

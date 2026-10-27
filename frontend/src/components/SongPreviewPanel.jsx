@@ -5,6 +5,59 @@ function SongSlideCanvas({ slide, settings }) {
   const textAlign = settings.align ?? 'center'
   const scaleFactor = 0.52
 
+  // ── Title slide layout ──────────────────────────────────────────
+  if (slide.is_title) {
+    return (
+      <div
+        className="relative w-full rounded-xl overflow-hidden select-none shadow-lg flex flex-col items-center justify-center p-8 text-center"
+        style={{ aspectRatio: '16/9', background: settings.bg_color }}
+      >
+        {slide.category && (
+          <span className="inline-block px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-widest bg-brand-50 text-brand-600 border border-brand-200 mb-3 shadow-xs">
+            {slide.category}
+          </span>
+        )}
+        <h2
+          style={{
+            color: settings.text_color,
+            fontFamily: settings.font_family,
+            fontSize: `clamp(16px, calc(${settings.font_size + 8}px * ${scaleFactor}), 7vw)`,
+            fontWeight: 800,
+            lineHeight: 1.25,
+            marginBottom: '0.4rem',
+            maxWidth: '90%',
+          }}
+        >
+          {slide.title}
+        </h2>
+        {slide.subtitle && (
+          <p
+            style={{
+              color: settings.ref_color,
+              fontFamily: settings.font_family,
+              fontSize: `clamp(11px, calc(${Math.max(settings.font_size - 14, 20)}px * ${scaleFactor}), 4.5vw)`,
+              fontWeight: 500,
+              lineHeight: 1.3,
+              maxWidth: '85%',
+            }}
+          >
+            {slide.subtitle}
+          </p>
+        )}
+        {/* 16:9 badge */}
+        <div className="absolute top-2 right-2 bg-black/20 text-black/30 text-[8px] px-1.5 py-0.5 rounded font-mono pointer-events-none">
+          16:9
+        </div>
+      </div>
+    )
+  }
+
+  // ── Lyrics slide layout (Verse or Chorus) ───────────────────────
+  const lines = slide.lines ?? []
+  const firstLine = lines[0] ?? ''
+  const restLines = lines.slice(1)
+  const isChorus = slide.prefix === 'R.' || slide.prefix_color === 'red'
+
   return (
     <div
       className="relative w-full rounded-xl overflow-hidden select-none shadow-lg"
@@ -12,7 +65,7 @@ function SongSlideCanvas({ slide, settings }) {
     >
       {/* Body lyrics — vertically centred */}
       <div
-        className="absolute inset-0 flex items-center px-[5%] py-[6%]"
+        className="absolute inset-0 flex items-center px-[5%] py-[6%] overflow-hidden"
         style={{ justifyContent: alignMap[textAlign] ?? 'center' }}
       >
         <p
@@ -25,16 +78,33 @@ function SongSlideCanvas({ slide, settings }) {
             whiteSpace: 'pre-wrap',
             textAlign,
             width: '100%',
+            overflowWrap: 'break-word',
           }}
         >
-          {(slide.lines ?? []).join('\n')}
+          {slide.prefix ? (
+            <>
+              {/* Only letter R. is red color for Chorus; verse_num_color for verses */}
+              <span
+                style={{
+                  color: isChorus ? (settings.chorus_r_color || '#ef4444') : (settings.verse_num_color || '#ffcc44'),
+                  fontWeight: 800,
+                }}
+              >
+                {slide.prefix}
+              </span>
+              {'  ' + firstLine}
+              {restLines.length > 0 ? '\n' + restLines.join('\n') : ''}
+            </>
+          ) : (
+            lines.join('\n')
+          )}
         </p>
       </div>
 
       {/* Song title — bottom-right */}
       {slide.title && (
         <div
-          className="absolute bottom-[4%] right-[4%] max-w-[70%] text-right"
+          className="absolute bottom-[4%] right-[4%] max-w-[70%] text-right truncate pointer-events-none"
           style={{
             color:      settings.ref_color,
             fontFamily: settings.font_family,
