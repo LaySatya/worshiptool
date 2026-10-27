@@ -15,6 +15,7 @@ import {
   Settings,
   ArrowDown,
   ArrowUp,
+  Menu,
 } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import PreviewPanel from "./components/PreviewPanel.jsx";
@@ -85,6 +86,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [detected, setDetected] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const bottomSectionRef = useRef(null);
   const readerSectionRef = useRef(null);
@@ -201,23 +203,46 @@ export default function App() {
   };
 
   return (
-    <div className="bg-slate-50 flex h-screen overflow-hidden">
-      {/* Left Sidebar */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col flex-shrink-0">
-        {/* Logo */}
-        <div className="h-16 flex items-center gap-3 px-5 border-b border-slate-100">
-          <div className="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center shadow-sm">
-            <BookOpen size={16} className="text-white" />
+    <div className="bg-slate-50 flex h-screen overflow-hidden relative">
+      {/* Responsive Backdrop Overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 transition-opacity"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Left Sidebar Drawer (Default Closed, slides out when opened) */}
+      <aside
+        className={`fixed top-0 bottom-0 left-0 w-72 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+      >
+        {/* Sidebar Header */}
+        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs">
+              <BookOpen size={16} className="text-white" />
+            </div>
+            <span className="font-bold text-slate-800 tracking-tight text-lg">
+              ChurchTool
+            </span>
           </div>
-          <span className="font-bold text-slate-800 tracking-tight text-lg">
-            ChurchTool
-          </span>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+            title="Close Sidebar"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
           <button
-            onClick={() => setPage("bible")}
+            onClick={() => {
+              setPage("bible");
+              setSidebarOpen(false);
+            }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
               ${
                 page === "bible"
@@ -231,7 +256,10 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setPage("song")}
+            onClick={() => {
+              setPage("song");
+              setSidebarOpen(false);
+            }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
               ${
                 page === "song"
@@ -245,7 +273,10 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setPage("merge")}
+            onClick={() => {
+              setPage("merge");
+              setSidebarOpen(false);
+            }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
               ${
                 page === "merge"
@@ -260,36 +291,49 @@ export default function App() {
         </nav>
 
         {/* Footer info */}
-        {page === "bible" && slides.length > 0 && (
-          <div className="p-4 border-t border-slate-100">
-            <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
-              <Layers size={14} className="text-brand-500" />
-              <span className="font-semibold">
-                {slides.length} slide{slides.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-          </div>
-        )}
+        <div className="p-4 border-t border-slate-100 bg-slate-50/50">
+          <p className="text-[11px] font-medium text-slate-400">
+            ChurchTool — Worship Presentation Suite
+          </p>
+        </div>
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden w-full">
         {/* Top Header */}
-        <header className="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-6 flex-shrink-0">
-          <div>
-            <h1 className="text-lg font-bold text-slate-800">
-              {page === "bible"
-                ? "Bible Slides"
-                : page === "song"
-                  ? "Song Slides"
-                  : "Merge Slides"}
-            </h1>
+        <header className="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-4 sm:px-6 flex-shrink-0 z-30">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen((prev) => !prev)}
+              className="p-2 -ml-1 rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition flex items-center justify-center"
+              title="Open Navigation Menu"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs">
+                {page === "bible" ? (
+                  <BookOpen size={16} className="text-white" />
+                ) : page === "song" ? (
+                  <Music size={16} className="text-white" />
+                ) : (
+                  <Merge size={16} className="text-white" />
+                )}
+              </div>
+              <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
+                {page === "bible"
+                  ? "Bible Slides"
+                  : page === "song"
+                    ? "Song Slides"
+                    : "Merge Slides"}
+              </h1>
+            </div>
             {page === "bible" && detected && (
-              <p className="text-xs text-slate-500 mt-0.5">
+              <span className="hidden md:inline-flex text-xs text-slate-500 ml-2">
                 {detected === "khmer"
                   ? "🇰🇭 Khmer verses detected"
                   : "📖 English references detected"}
-              </p>
+              </span>
             )}
           </div>
 
