@@ -16,6 +16,7 @@ import {
   Menu,
   FileMusic,
   ExternalLink,
+  Calculator,
 } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import PreviewPanel from "./components/PreviewPanel.jsx";
@@ -23,6 +24,7 @@ import BibleReader from "./components/BibleReader.jsx";
 import SongSlidePage from "./SongSlidePage.jsx";
 import MergeSlidesPage from "./MergeSlidesPage.jsx";
 import MelodySlidePage from "./MelodySlidePage.jsx";
+import MathematicPage from "./MathematicPage.jsx";
 import { fetchPreview, generatePptx } from "./api.js";
 import { DEFAULT_SETTINGS } from "./constants.js";
 
@@ -297,6 +299,23 @@ export default function App() {
             <span>Merge Slides</span>
             {page === "merge" && <ChevronRight size={16} className="ml-auto" />}
           </button>
+
+          <button
+            onClick={() => {
+              setPage("math");
+              setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
+              ${
+                page === "math"
+                  ? "bg-brand-50 text-brand-600 border border-brand-200"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+          >
+            <Calculator size={18} />
+            <span>Mathematic</span>
+            {page === "math" && <ChevronRight size={16} className="ml-auto" />}
+          </button>
         </nav>
 
         {/* Footer info */}
@@ -327,6 +346,8 @@ export default function App() {
                   <FileMusic size={16} className="text-white" />
                 ) : page === "song" ? (
                   <Music size={16} className="text-white" />
+                ) : page === "math" ? (
+                  <Calculator size={16} className="text-white" />
                 ) : (
                   <Merge size={16} className="text-white" />
                 )}
@@ -338,7 +359,9 @@ export default function App() {
                     ? "Melody Slide"
                     : page === "song"
                       ? "Song Slides"
-                      : "Merge Slides"}
+                      : page === "math"
+                        ? "Mathematic"
+                        : "Merge Slides"}
               </h1>
             </div>
             {page === "bible" && detected && (
@@ -383,7 +406,9 @@ export default function App() {
         </header>
 
         {/* Page Content */}
-        {page === "melody" ? (
+        {page === "math" ? (
+          <MathematicPage />
+        ) : page === "melody" ? (
           <MelodySlidePage />
         ) : page === "song" ? (
           <SongSlidePage />

@@ -4,7 +4,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['"Kantumruy Pro"', 'Inter', 'system-ui', 'sans-serif'],
+        khmer: ['"Kantumruy Pro"', 'Battambang', '"Khmer OS Battambang"', 'sans-serif'],
+        muol: ['Moul', '"Khmer OS Muol"', 'serif'],
       },
       colors: {
         brand: {
