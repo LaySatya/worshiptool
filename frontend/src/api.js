@@ -100,3 +100,57 @@ export async function mergePptxFiles(files, outputName = 'merged_slides') {
   }
   return res.blob()
 }
+
+// ── Melody Slide endpoints ────────────────────────────────────────
+
+/**
+ * Process a PDF or image of a melody sheet to extract pages and auto-detected pieces.
+ * @param {File} file
+ * @param {number} linesPerSlide
+ * @param {number} dpi
+ */
+export async function processMelodyFile(file, linesPerSlide = 1, dpi = 200) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('lines_per_slide', linesPerSlide)
+  form.append('dpi', dpi)
+  const res = await fetch(`${BASE}/melody/process`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to process melody file')
+  }
+  return res.json()
+}
+
+/**
+ * Manually crop a custom rectangle piece from a melody page.
+ */
+export async function cropMelodyPiece(file, pageIndex, box, dpi = 200) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('page_index', pageIndex)
+  form.append('box_json', JSON.stringify(box))
+  form.append('dpi', dpi)
+  const res = await fetch(`${BASE}/melody/crop-piece`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to crop piece')
+  }
+  return res.json()
+}
+
+/**
+ * Generate a PPTX presentation from selected melody pieces.
+ */
+export async function generateMelodyPptx(payload) {
+  const res = await fetch(`${BASE}/melody/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Melody PPTX generation failed')
+  }
+  return res.blob()
+}

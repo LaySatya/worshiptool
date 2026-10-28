@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ExternalLink, RefreshCw, ArrowLeft, ArrowRight } from "lucide-react";
+import { ExternalLink, RefreshCw, ArrowLeft, ArrowRight, X } from "lucide-react";
 
 const PROXY = "/api/bible-proxy/";
 const HOME = "bibles/khmer/";
@@ -9,7 +9,7 @@ const HOME = "bibles/khmer/";
  * Selections inside the proxied page are forwarded via postMessage and
  * surfaced through onSelection(text).
  */
-export default function BibleReader({ onSelection, onDeselection }) {
+export default function BibleReader({ onSelection, onDeselection, onClose, title = "Khmer Bible Reader" }) {
   const [url, setUrl] = useState(PROXY + HOME);
   const [back, setBack] = useState([]);
   const [forward, setForward] = useState([]);
@@ -126,6 +126,17 @@ export default function BibleReader({ onSelection, onDeselection }) {
         >
           <ExternalLink size={14} />
         </a>
+
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close Bible Reader"
+            className="p-1.5 rounded-lg hover:bg-red-50 hover:text-red-600 text-slate-400 transition ml-1"
+          >
+            <X size={16} />
+          </button>
+        )}
       </div>
 
       {/* iframe */}

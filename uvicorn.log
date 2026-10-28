@@ -1,0 +1,317 @@
+INFO:     Will watch for changes in these directories: ['/Users/johnsmith/Downloads/Development/worshiptool']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [55814] using WatchFiles
+[static] __file__      = /Users/johnsmith/Downloads/Development/worshiptool/main.py
+[static] _FRONTEND_DIST = /Users/johnsmith/Downloads/Development/worshiptool/frontend/dist
+[static] dist exists   = True
+[static] Mounted /assets -> /Users/johnsmith/Downloads/Development/worshiptool/frontend/dist/assets
+INFO:     Started server process [55858]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:54456 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54920 - "POST /api/melody/generate HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/uvicorn/protocols/http/httptools_impl.py", line 422, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/uvicorn/middleware/proxy_headers.py", line 63, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/applications.py", line 1194, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/applications.py", line 96, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/telemetry/_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 91, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 149, in simple_response
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/routing.py", line 683, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 2811, in app
+    await route.handle(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 1330, in handle
+    await super().handle(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/routing.py", line 289, in handle
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 166, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 152, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 745, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 372, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/main.py", line 2547, in melody_generate
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/responses.py", line 245, in __init__
+    self.init_headers(headers)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/responses.py", line 64, in init_headers
+    raw_headers = [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in headers.items()]
+                                                 ~~~~~~~~^^^^^^^^^^^
+UnicodeEncodeError: 'latin-1' codec can't encode character '\u1796' in position 24: ordinal not in range(256)
+INFO:     127.0.0.1:54996 - "POST /api/melody/process HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55016 - "POST /api/melody/generate HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/uvicorn/protocols/http/httptools_impl.py", line 422, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/uvicorn/middleware/proxy_headers.py", line 63, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/applications.py", line 1194, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/applications.py", line 96, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/telemetry/_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 91, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 149, in simple_response
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/routing.py", line 683, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 2811, in app
+    await route.handle(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 1330, in handle
+    await super().handle(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/routing.py", line 289, in handle
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 166, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 152, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 745, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 372, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/main.py", line 2547, in melody_generate
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/responses.py", line 245, in __init__
+    self.init_headers(headers)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/responses.py", line 64, in init_headers
+    raw_headers = [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in headers.items()]
+                                                 ~~~~~~~~^^^^^^^^^^^
+UnicodeEncodeError: 'latin-1' codec can't encode character '\u1785' in position 24: ordinal not in range(256)
+INFO:     127.0.0.1:55023 - "POST /api/melody/process HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55065 - "POST /api/melody/crop-piece HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55074 - "POST /api/melody/generate HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/uvicorn/protocols/http/httptools_impl.py", line 422, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/uvicorn/middleware/proxy_headers.py", line 63, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/applications.py", line 1194, in __call__
+    await super().__call__(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/applications.py", line 96, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/telemetry/_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 91, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 149, in simple_response
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/routing.py", line 683, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 2811, in app
+    await route.handle(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 1330, in handle
+    await super().handle(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/routing.py", line 289, in handle
+    await self.app(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 166, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 152, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 745, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/fastapi/routing.py", line 372, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/main.py", line 2547, in melody_generate
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/responses.py", line 245, in __init__
+    self.init_headers(headers)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Users/johnsmith/Downloads/Development/worshiptool/venv/lib/python3.14/site-packages/starlette/responses.py", line 64, in init_headers
+    raw_headers = [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in headers.items()]
+                                                 ~~~~~~~~^^^^^^^^^^^
+UnicodeEncodeError: 'latin-1' codec can't encode character '\u179f' in position 24: ordinal not in range(256)
+INFO:     127.0.0.1:55584 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55920 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56034 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56057 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56058 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56080 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56590 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59767 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59768 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60092 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60093 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60105 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60108 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60136 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60139 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60160 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60164 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60171 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60178 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60182 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60189 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60193 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60199 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60203 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60211 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60218 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60221 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60227 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60292 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60295 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60298 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60301 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60308 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60311 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60319 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60323 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60329 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60333 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60339 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60342 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60347 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60354 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60358 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60362 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60365 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60375 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60378 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60382 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60389 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60392 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60396 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60403 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60410 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60414 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60420 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60425 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60431 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60438 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60443 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60450 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60457 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60460 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60463 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60471 - "POST /api/song/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60487 - "POST /api/song/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60684 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60709 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60725 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60746 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60782 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60821 - "POST /api/merge/preview-slides HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60907 - "POST /api/merge/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61183 - "GET /api/bible-proxy/bibles/khmer/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61193 - "GET /api/bible-proxy/bibles/khmer/B02/C001.htm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61201 - "GET /api/bible-proxy/bibles/khmer/B02/C032.htm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61213 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61220 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61223 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61229 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61234 - "POST /api/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61322 - "POST /api/generate HTTP/1.1" 200 OK

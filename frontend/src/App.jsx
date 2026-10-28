@@ -13,15 +13,16 @@ import {
   Merge,
   ChevronRight,
   Settings,
-  ArrowDown,
-  ArrowUp,
   Menu,
+  FileMusic,
+  ExternalLink,
 } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import PreviewPanel from "./components/PreviewPanel.jsx";
 import BibleReader from "./components/BibleReader.jsx";
 import SongSlidePage from "./SongSlidePage.jsx";
 import MergeSlidesPage from "./MergeSlidesPage.jsx";
+import MelodySlidePage from "./MelodySlidePage.jsx";
 import { fetchPreview, generatePptx } from "./api.js";
 import { DEFAULT_SETTINGS } from "./constants.js";
 
@@ -74,7 +75,7 @@ Romans 8:28
 And we know that in all things God works for the good of those who love him.`;
 
 export default function App() {
-  const [page, setPage] = useState("bible"); // 'bible' | 'song' | 'merge'
+  const [page, setPage] = useState("bible"); // 'bible' | 'melody' | 'song' | 'merge'
   const [rawText, setRawText] = useState("");
   const [reference, setReference] = useState("");
   const [perSlide, setPerSlide] = useState(1);
@@ -87,9 +88,8 @@ export default function App() {
   const [detected, setDetected] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bibleModalOpen, setBibleModalOpen] = useState(false);
 
-  const bottomSectionRef = useRef(null);
-  const readerSectionRef = useRef(null);
   const lastSelectedTextRef = useRef(null);
 
   const dRawText = useDebounce(rawText, 350);
@@ -157,14 +157,6 @@ export default function App() {
     // When the user unselects, reset the tracker so selecting the same verse again will work
     lastSelectedTextRef.current = null;
   }, []);
-
-  const scrollToBottom = () => {
-    bottomSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  const scrollToTop = () => {
-    readerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
 
   const handleGenerate = async () => {
     if (!rawText.trim()) {
@@ -257,6 +249,23 @@ export default function App() {
 
           <button
             onClick={() => {
+              setPage("melody");
+              setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
+              ${
+                page === "melody"
+                  ? "bg-brand-50 text-brand-600 border border-brand-200"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+          >
+            <FileMusic size={18} />
+            <span>Melody Slide</span>
+            {page === "melody" && <ChevronRight size={16} className="ml-auto" />}
+          </button>
+
+          <button
+            onClick={() => {
               setPage("song");
               setSidebarOpen(false);
             }}
@@ -314,6 +323,8 @@ export default function App() {
               <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs">
                 {page === "bible" ? (
                   <BookOpen size={16} className="text-white" />
+                ) : page === "melody" ? (
+                  <FileMusic size={16} className="text-white" />
                 ) : page === "song" ? (
                   <Music size={16} className="text-white" />
                 ) : (
@@ -323,9 +334,11 @@ export default function App() {
               <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
                 {page === "bible"
                   ? "Bible Slides"
-                  : page === "song"
-                    ? "Song Slides"
-                    : "Merge Slides"}
+                  : page === "melody"
+                    ? "Melody Slide"
+                    : page === "song"
+                      ? "Song Slides"
+                      : "Merge Slides"}
               </h1>
             </div>
             {page === "bible" && detected && (
@@ -370,129 +383,110 @@ export default function App() {
         </header>
 
         {/* Page Content */}
-        {page === "song" ? (
+        {page === "melody" ? (
+          <MelodySlidePage />
+        ) : page === "song" ? (
           <SongSlidePage />
         ) : page === "merge" ? (
           <MergeSlidesPage />
         ) : (
           /* ── Bible Slides Content ── */
           <div className="flex-1 overflow-hidden flex">
-            {/* Bible Slides Workspace (scrolls vertically: full-screen reader on top, text & preview below) */}
-            <div className="flex-1 overflow-y-auto scroll-smooth flex flex-col">
-              {/* SECTION 1: Full screen height Bible Reader */}
-              <section
-                ref={readerSectionRef}
-                className="h-[calc(100vh-4rem)] min-h-[640px] flex-shrink-0 p-4 pb-2 flex flex-col"
-              >
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <BibleReader
-                    onSelection={handleBibleSelection}
-                    onDeselection={handleBibleDeselection}
+            {/* Bible Slides Workspace (Side-by-side row: Bible Text & Live Preview) */}
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+              {/* Header bar */}
+              <div className="flex items-center justify-between bg-white px-5 py-3 rounded-xl border border-slate-200/80 shadow-xs flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center font-bold">
+                    <FileText size={16} />
+                  </div>
+                  <div>
+                    <h2 className="font-bold text-slate-800 text-sm">Bible Slides Editor &amp; Live Preview</h2>
+                    <p className="text-xs text-slate-400">Edit text, adjust slide options, or copy verses directly from online Bible</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBibleModalOpen(true)}
+                    className="btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5 text-brand-700 bg-brand-50 hover:bg-brand-100 border-brand-200 font-semibold transition"
+                    title="Open Bible Reader popup to select and copy verses"
+                  >
+                    <BookOpen size={14} className="text-brand-600" />
+                    <span>Copy Verse from Website</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Side-by-side row: Bible Text (left) and Live Preview (right) */}
+              <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-[520px]">
+                {/* Left card: Bible Text Input */}
+                <div className="card p-5 flex flex-col h-full">
+                  <div className="flex items-center justify-between flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <FileText size={16} className="text-brand-500" />
+                      <h2 className="font-semibold text-slate-800 text-sm">
+                        Bible Text
+                      </h2>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* Copy Verse from Website Button */}
+                      <button
+                        type="button"
+                        onClick={() => setBibleModalOpen(true)}
+                        className="px-2.5 py-1 rounded-lg bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs hover:shadow-xs"
+                        title="Open Bible Reader popup to select and copy verses directly"
+                      >
+                        <BookOpen size={13} className="text-brand-600" />
+                        <span>Copy Verse from Website</span>
+                      </button>
+
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <span>Per slide:</span>
+                        <select
+                          className="px-2 py-0.5 rounded border border-slate-200 bg-white text-xs font-medium"
+                          value={perSlide}
+                          onChange={(e) =>
+                            setPerSlide(parseInt(e.target.value, 10))
+                          }
+                        >
+                          {[1, 2, 3, 4, 5, 6].map((n) => (
+                            <option key={n} value={n}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {rawText && (
+                        <button
+                          onClick={() => setRawText("")}
+                          className="text-xs text-slate-400 hover:text-red-500 transition font-medium"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <textarea
+                    className="input resize-none text-[13px] leading-relaxed flex-1 mt-3 min-h-[280px]"
+                    placeholder={PLACEHOLDER}
+                    value={rawText}
+                    onChange={(e) => setRawText(e.target.value)}
                   />
                 </div>
 
-                {/* Jump bar at the bottom of the iframe */}
-                <div className="pt-2 flex items-center justify-between px-2 text-xs text-slate-500 flex-shrink-0">
-                  <span className="flex items-center gap-1.5 text-slate-500">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Highlight any verse in the reader above to automatically add slides below
-                  </span>
-                  <button
-                    type="button"
-                    onClick={scrollToBottom}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium transition shadow-xs"
-                  >
-                    <span>Go to Text &amp; Preview</span>
-                    <ArrowDown size={14} />
-                  </button>
+                {/* Right card: Live Preview */}
+                <div className="card p-5 flex flex-col h-full overflow-hidden">
+                  <PreviewPanel
+                    slides={slides}
+                    settings={settings}
+                    current={currentSlide}
+                    onNavigate={setCurrentSlide}
+                    isLoading={previewLoading}
+                  />
                 </div>
-              </section>
-
-              {/* SECTION 2: Bible Text & Live Preview in a row */}
-              <section
-                ref={bottomSectionRef}
-                className="min-h-[calc(100vh-4rem)] p-4 pt-2 flex flex-col gap-4 flex-shrink-0 bg-slate-50 border-t border-slate-200/80"
-              >
-                {/* Header bar with Back to Reader button */}
-                <div className="flex items-center justify-between bg-white px-5 py-3 rounded-xl border border-slate-200/80 shadow-xs flex-shrink-0">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center font-bold">
-                      <FileText size={16} />
-                    </div>
-                    <div>
-                      <h2 className="font-bold text-slate-800 text-sm">Bible Slides Editor &amp; Live Preview</h2>
-                      <p className="text-xs text-slate-400">Edit captured text, adjust slide options, or live preview slides</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={scrollToTop}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs font-semibold transition"
-                    >
-                      <ArrowUp size={13} />
-                      <span>Back to Bible Reader</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Side-by-side row: Bible Text (left) and Live Preview (right) */}
-                <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-[520px]">
-                  {/* Left card: Bible Text Input */}
-                  <div className="card p-5 flex flex-col h-full">
-                    <div className="flex items-center justify-between flex-shrink-0">
-                      <h2 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                        <FileText size={16} className="text-brand-500" />
-                        Bible Text
-                      </h2>
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                          <span>Per slide:</span>
-                          <select
-                            className="px-2 py-0.5 rounded border border-slate-200 bg-white text-xs font-medium"
-                            value={perSlide}
-                            onChange={(e) =>
-                              setPerSlide(parseInt(e.target.value, 10))
-                            }
-                          >
-                            {[1, 2, 3, 4, 5, 6].map((n) => (
-                              <option key={n} value={n}>
-                                {n}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        {rawText && (
-                          <button
-                            onClick={() => setRawText("")}
-                            className="text-xs text-slate-400 hover:text-red-500 transition font-medium"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <textarea
-                      className="input resize-none text-[13px] leading-relaxed flex-1 mt-3 min-h-[280px]"
-                      placeholder={PLACEHOLDER}
-                      value={rawText}
-                      onChange={(e) => setRawText(e.target.value)}
-                    />
-                  </div>
-
-                  {/* Right card: Live Preview */}
-                  <div className="card p-5 flex flex-col h-full overflow-hidden">
-                    <PreviewPanel
-                      slides={slides}
-                      settings={settings}
-                      current={currentSlide}
-                      onNavigate={setCurrentSlide}
-                      isLoading={previewLoading}
-                    />
-                  </div>
-                </div>
-              </section>
+              </div>
             </div>
 
             {/* RIGHT: Collapsible Settings Panel */}
@@ -527,6 +521,68 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Popup Iframe Modal for copying Bible Verse */}
+      {bibleModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div
+            className="w-full max-w-5xl h-[88vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="h-12 bg-white border-b border-slate-200 px-4 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center">
+                  <BookOpen size={15} />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-800 leading-tight">
+                    Bible Reader — Select &amp; Copy Verse
+                  </h3>
+                  <p className="text-[11px] text-slate-400 hidden sm:block leading-none">
+                    Highlight any verse: text is automatically captured into your slides
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBibleModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                  title="Close Modal"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: Embedded Bible Reader iframe with proxy */}
+            <div className="flex-1 min-h-0 p-3 bg-slate-50 flex flex-col">
+              <BibleReader
+                onSelection={handleBibleSelection}
+                onDeselection={handleBibleDeselection}
+                onClose={() => setBibleModalOpen(false)}
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-slate-200 bg-white flex items-center justify-between text-xs text-slate-600 flex-shrink-0">
+              <span className="flex items-center gap-1.5 text-emerald-700 font-medium text-[11px] sm:text-xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Select any text to copy directly to your slides
+              </span>
+              <button
+                type="button"
+                onClick={() => setBibleModalOpen(false)}
+                className="btn-primary !py-1.5 !px-4 text-xs"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <Toast

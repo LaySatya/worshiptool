@@ -10,6 +10,7 @@ import os
 import re
 import uuid
 import zipfile
+import base64
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -2216,6 +2217,335 @@ async def merge_generate(
 
     return StreamingResponse(
         io.BytesIO(merged),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Melody Slide — PDF / Image Staff + Lyric Piece Cropper & Slides
+# ═══════════════════════════════════════════════════════════════════
+
+def _row_dark_density_melody(gray: np.ndarray, threshold: int = 240) -> np.ndarray:
+    return (gray < threshold).mean(axis=1).astype(float)
+
+
+def _moving_avg_melody(arr: np.ndarray, w: int = 9) -> np.ndarray:
+    return np.convolve(arr, np.ones(w) / w, mode="same")
+
+
+def _gap_spans_melody(is_blank: np.ndarray, min_px: int) -> list:
+    spans, in_g, g0 = [], False, 0
+    for y, b in enumerate(is_blank):
+        if b and not in_g:
+            in_g, g0 = True, y
+        elif not b and in_g:
+            in_g = False
+            if y - g0 >= min_px:
+                spans.append((g0, y))
+    if in_g and len(is_blank) - g0 >= min_px:
+        spans.append((g0, len(is_blank)))
+    return spans
+
+
+def _detect_melody_raw_strips(image: Image.Image,
+                              white_thr: int = 240,
+                              min_gap_px: int = 10,
+                              min_block_px: int = 35) -> list[tuple[int, int]]:
+    gray    = np.array(image.convert("L"))
+    density = _moving_avg_melody(_row_dark_density_melody(gray, white_thr), w=9)
+    blank   = density < 0.005
+    strips, prev = [], 0
+    for g0, g1 in _gap_spans_melody(blank, min_gap_px):
+        if g0 - prev >= min_block_px:
+            strips.append((prev, g0))
+        prev = g1
+    h = gray.shape[0]
+    if h - prev >= min_block_px:
+        strips.append((prev, h))
+    return strips
+
+
+def _pair_melody_notation_lyrics(strips: list[tuple[int, int]], gray: np.ndarray,
+                                 white_thr: int = 240) -> list[tuple[int, int]]:
+    if len(strips) < 2:
+        return strips
+
+    def dens(t, b):
+        return (gray[t:b] < white_thr).mean() if b > t else 0.0
+
+    def inter_gap(i):
+        return strips[i + 1][0] - strips[i][1] if i + 1 < len(strips) else 99999
+
+    out, i = [], 0
+    while i < len(strips):
+        t0, b0 = strips[i]
+        if i + 1 < len(strips):
+            t1, b1  = strips[i + 1]
+            g_in    = inter_gap(i)
+            g_out   = inter_gap(i + 1)
+            d0, d1  = dens(t0, b0), dens(t1, b1)
+            tight   = g_in < g_out * 0.60 and g_in < 110
+            stave_above_lyric = g_in < 90 and d0 > d1 * 1.15
+            if tight or stave_above_lyric:
+                out.append((t0, b1))
+                i += 2
+                continue
+        out.append(strips[i])
+        i += 1
+    return out
+
+
+def _make_melody_crop(page_rgb: Image.Image,
+                      crop_box: tuple[int, int, int, int] | tuple[int, int],
+                      pad: int = 15) -> Image.Image:
+    """
+    Produce a cropped PIL image with white padding.
+    Supports either (top, bottom) for full-width horizontal crop,
+    or (left, top, right, bottom) for 2D box crop.
+    """
+    w, h = page_rgb.size
+    if len(crop_box) == 2:
+        top, bottom = crop_box
+        t = max(0, top - pad)
+        b = min(h, bottom + pad)
+        crop = page_rgb.crop((0, t, w, b))
+    else:
+        l, t, r, b = crop_box
+        crop = page_rgb.crop((
+            max(0, l - pad),
+            max(0, t - pad),
+            min(w, r + pad),
+            min(h, b + pad),
+        ))
+
+    from PIL import ImageOps
+    return ImageOps.expand(crop, border=20, fill=(255, 255, 255))
+
+
+def _add_melody_image_slide(prs: Presentation, img_bytes: bytes, bg_hex: str = "#ffffff") -> None:
+    """Add a slide and center/scale the cropped melody piece to fit presentation slide."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    bg_rgb = _hex_to_rgb(bg_hex)
+    bg = slide.background.fill
+    bg.solid()
+    bg.fore_color.rgb = RGBColor(*bg_rgb)
+
+    sw, sh = prs.slide_width, prs.slide_height
+
+    im = Image.open(io.BytesIO(img_bytes))
+    iw, ih = im.size
+    aspect = iw / ih
+
+    max_w = sw * 0.94
+    max_h = sh * 0.88
+    fit_w = max_w
+    fit_h = fit_w / aspect
+    if fit_h > max_h:
+        fit_h = max_h
+        fit_w = fit_h * aspect
+
+    left = (sw - fit_w) / 2
+    top  = (sh - fit_h) / 2
+
+    # Save to temp buffer for python-pptx add_picture
+    buf = io.BytesIO(img_bytes)
+    slide.shapes.add_picture(buf, int(left), int(top), int(fit_w), int(fit_h))
+
+
+@app.post("/api/melody/process")
+async def melody_process(
+    file: UploadFile = File(...),
+    lines_per_slide: int = Form(1),
+    dpi: int = Form(200),
+):
+    """
+    Accept an uploaded PDF or image file of a melody/hymn sheet,
+    render all pages to PNG, detect or extract pieces/strips (staff + lyrics),
+    and return pages + pieces with base64 images so the user can review,
+    reorder, remove, or manually select pieces.
+    """
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in (".pdf", ".png", ".jpg", ".jpeg", ".webp"):
+        raise HTTPException(status_code=400, detail="Only PDF, PNG, JPG, or WEBP files are supported.")
+
+    file_bytes = await file.read()
+    page_images: list[Image.Image] = []
+
+    if ext == ".pdf":
+        try:
+            from pdf2image import convert_from_bytes
+            page_images = convert_from_bytes(file_bytes, dpi=dpi)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"PDF conversion failed: {e}")
+    else:
+        try:
+            img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+            page_images = [img]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Image reading failed: {e}")
+
+    result_pages = []
+    result_pieces = []
+    piece_counter = 0
+
+    for page_idx, page in enumerate(page_images):
+        page_rgb = page.convert("RGB")
+        w, h = page_rgb.size
+        gray = np.array(page_rgb.convert("L"))
+
+        # Save web-sized page preview (max width 1200)
+        preview_page = page_rgb.copy()
+        preview_scale = 1.0
+        if w > 1200:
+            preview_scale = 1200 / w
+            preview_page = preview_page.resize((1200, int(h * preview_scale)), Image.Resampling.LANCZOS)
+
+        p_buf = io.BytesIO()
+        preview_page.save(p_buf, format="JPEG", quality=85)
+        page_b64 = f"data:image/jpeg;base64,{base64.b64encode(p_buf.getvalue()).decode('utf-8')}"
+
+        result_pages.append({
+            "page_index": page_idx,
+            "width": w,
+            "height": h,
+            "preview_data_url": page_b64,
+        })
+
+        # Automatic melody piece detection (staff rows paired with lyrics)
+        raw_strips = _detect_melody_raw_strips(page_rgb, white_thr=240, min_gap_px=10, min_block_px=35)
+        if not raw_strips:
+            # Fallback: slice into equal vertical sections
+            n_sec = max(3, h // 280)
+            sec_h = h // n_sec
+            raw_strips = [(i * sec_h, (i + 1) * sec_h) for i in range(n_sec)]
+
+        singable = _pair_melody_notation_lyrics(raw_strips, gray)
+
+        # Group singable lines per slide
+        groups: list[tuple[int, int]] = []
+        lps = max(1, min(lines_per_slide, 6))
+        for start_idx in range(0, len(singable), lps):
+            chunk = singable[start_idx : start_idx + lps]
+            groups.append((chunk[0][0], chunk[-1][1]))
+
+        for grp_top, grp_bot in groups:
+            crop_im = _make_melody_crop(page_rgb, (grp_top, grp_bot), pad=16)
+            if crop_im.size[1] < 30:
+                continue
+
+            c_buf = io.BytesIO()
+            crop_im.save(c_buf, format="PNG")
+            c_bytes = c_buf.getvalue()
+            c_b64 = f"data:image/png;base64,{base64.b64encode(c_bytes).decode('utf-8')}"
+
+            piece_counter += 1
+            result_pieces.append({
+                "id": str(uuid.uuid4())[:8],
+                "order": piece_counter,
+                "page_index": page_idx,
+                "box": [0, int(grp_top), int(w), int(grp_bot)],
+                "image_data_url": c_b64,
+                "label": f"Piece {piece_counter}",
+            })
+
+    return {
+        "filename": file.filename,
+        "page_count": len(page_images),
+        "pages": result_pages,
+        "pieces": result_pieces,
+    }
+
+
+class MelodyCropRequest(BaseModel):
+    page_index: int
+    box: list[int]   # [left, top, right, bottom] in original image coordinates
+    page_data_url: Optional[str] = None
+
+
+@app.post("/api/melody/crop-piece")
+async def melody_crop_piece(
+    file: Optional[UploadFile] = File(None),
+    page_index: int = Form(0),
+    box_json: str = Form("[0,0,100,100]"),
+    dpi: int = Form(200),
+):
+    """Crop an arbitrary user-selected rectangle from a page and return the piece."""
+    import json
+    try:
+        box = json.loads(box_json)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid box JSON")
+
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    file_bytes = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+
+    if ext == ".pdf":
+        from pdf2image import convert_from_bytes
+        pages = convert_from_bytes(file_bytes, dpi=dpi, first_page=page_index + 1, last_page=page_index + 1)
+        if not pages:
+            raise HTTPException(status_code=400, detail="Page not found in PDF")
+        page_img = pages[0].convert("RGB")
+    else:
+        page_img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+
+    l, t, r, b = box
+    crop_im = _make_melody_crop(page_img, (l, t, r, b), pad=10)
+    c_buf = io.BytesIO()
+    crop_im.save(c_buf, format="PNG")
+    c_bytes = c_buf.getvalue()
+    c_b64 = f"data:image/png;base64,{base64.b64encode(c_bytes).decode('utf-8')}"
+
+    return {
+        "id": str(uuid.uuid4())[:8],
+        "image_data_url": c_b64,
+        "box": box,
+        "page_index": page_index,
+    }
+
+
+class MelodyGenerateRequest(BaseModel):
+    title: str = "melody_slides"
+    bg_color: str = "#ffffff"
+    pieces: list[dict] = []  # list of { image_data_url: str, label?: str }
+
+
+@app.post("/api/melody/generate")
+async def melody_generate(req: MelodyGenerateRequest):
+    """
+    Generate a 16:9 PowerPoint presentation (.pptx) where each piece (melody staff + lyric cut)
+    is placed centered and scaled up on its own slide for optimal church projector display.
+    """
+    if not req.pieces:
+        raise HTTPException(status_code=400, detail="No melody pieces to generate slides for.")
+
+    prs = Presentation()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    for piece in req.pieces:
+        data_url = piece.get("image_data_url", "")
+        if not data_url or "," not in data_url:
+            continue
+        try:
+            b64_str = data_url.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64_str)
+            _add_melody_image_slide(prs, img_bytes, bg_hex=req.bg_color)
+        except Exception as e:
+            continue
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+
+    safe_title = re.sub(r'[^\w\-]', '_', req.title.strip()) or "melody_slides"
+    filename = f"{safe_title}.pptx"
+
+    return StreamingResponse(
+        buf,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
