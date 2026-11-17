@@ -24,7 +24,7 @@ export const DEFAULT_SONG_SETTINGS = {
   text_color:      '#000000',
   ref_color:       '#555555',
   ref_font_size:   22,
-  verse_num_color: '#ffcc44',
+  verse_num_color: '#ef4444',
   chorus_r_color:  '#ef4444',
   padding:         0.1,
   lines_per_slide: 2,

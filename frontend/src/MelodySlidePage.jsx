@@ -37,9 +37,16 @@ function Toast({ message, type = "success", onClose }) {
       className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-panel border text-sm font-medium animate-fade-in
       ${type === "success" ? "bg-white border-green-200 text-green-700" : "bg-white border-red-200 text-red-700"}`}
     >
-      {type === "success" ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+      {type === "success" ? (
+        <CheckCircle2 size={15} />
+      ) : (
+        <AlertCircle size={15} />
+      )}
       {message}
-      <button onClick={onClose} className="ml-1 text-slate-400 hover:text-slate-600">
+      <button
+        onClick={onClose}
+        className="ml-1 text-slate-400 hover:text-slate-600"
+      >
         <X size={13} />
       </button>
     </div>
@@ -101,7 +108,7 @@ export default function MelodySlidePage() {
         setLoading(false);
       }
     },
-    [linesPerSlide]
+    [linesPerSlide],
   );
 
   const onDrop = (e) => {
@@ -202,7 +209,10 @@ export default function MelodySlidePage() {
         type: "success",
       });
     } catch (err) {
-      setToast({ message: "Could not crop piece: " + err.message, type: "error" });
+      setToast({
+        message: "Could not crop piece: " + err.message,
+        type: "error",
+      });
     } finally {
       setCropping(false);
     }
@@ -232,7 +242,10 @@ export default function MelodySlidePage() {
         type: "success",
       });
     } catch (err) {
-      setToast({ message: "Failed to generate PPTX: " + err.message, type: "error" });
+      setToast({
+        message: "Failed to generate PPTX: " + err.message,
+        type: "error",
+      });
     } finally {
       setGenerating(false);
     }
@@ -263,7 +276,8 @@ export default function MelodySlidePage() {
               Melody &amp; Notation Slide Generator
             </h2>
             <p className="text-xs text-slate-400">
-              Split melody + lyric sheet into large, clean presentation slides for church projection
+              Split melody + lyric sheet into large, clean presentation slides
+              for church projection
             </p>
           </div>
         </div>
@@ -271,7 +285,9 @@ export default function MelodySlidePage() {
         <div className="flex items-center gap-3">
           {pieces.length > 0 && (
             <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-2.5 py-1.5 rounded-lg">
-              <span className="font-semibold text-brand-600">{pieces.length}</span>
+              <span className="font-semibold text-brand-600">
+                {pieces.length}
+              </span>
               <span>slides ready</span>
             </div>
           )}
@@ -328,9 +344,15 @@ export default function MelodySlidePage() {
               Upload Melody Music Sheet (PDF or Image)
             </h3>
             <p className="text-xs text-slate-500 max-w-md mb-6 leading-relaxed">
-              Upload your scanned hymn or worship song with notes and lyrics. The system will automatically cut it into individual slide-sized pieces, or let you crop custom pieces so notation looks large and readable when projected.
+              Upload your scanned hymn or worship song with notes and lyrics.
+              The system will automatically cut it into individual slide-sized
+              pieces, or let you crop custom pieces so notation looks large and
+              readable when projected.
             </p>
-            <button type="button" className="btn-primary text-xs !py-2.5 !px-5 pointer-events-none">
+            <button
+              type="button"
+              className="btn-primary text-xs !py-2.5 !px-5 pointer-events-none"
+            >
               <Upload size={14} />
               Select PDF or Image
             </button>
@@ -347,7 +369,9 @@ export default function MelodySlidePage() {
             {/* Toolbar */}
             <div className="p-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-xs text-slate-700">Original Sheet</span>
+                <span className="font-semibold text-xs text-slate-700">
+                  Original Sheet
+                </span>
                 {pages.length > 1 && (
                   <div className="flex items-center gap-1 text-xs">
                     {pages.map((p, idx) => (
@@ -378,7 +402,10 @@ export default function MelodySlidePage() {
                   }`}
                   title="Enable click-and-drag box cropper on image"
                 >
-                  <Crop size={13} className={cropMode ? "text-brand-600" : "text-slate-500"} />
+                  <Crop
+                    size={13}
+                    className={cropMode ? "text-brand-600" : "text-slate-500"}
+                  />
                   <span>{cropMode ? "Cropper Active" : "Select & Crop"}</span>
                 </button>
               </div>
@@ -408,7 +435,10 @@ export default function MelodySlidePage() {
               onMouseUp={handleMouseUp}
             >
               {currentPage ? (
-                <div ref={pageContainerRef} className="relative inline-block shadow-sm">
+                <div
+                  ref={pageContainerRef}
+                  className="relative inline-block shadow-sm"
+                >
                   <img
                     src={currentPage.preview_data_url}
                     alt={`Melody page ${selectedPageIndex + 1}`}
@@ -434,7 +464,8 @@ export default function MelodySlidePage() {
                     .filter((p) => p.page_index === selectedPageIndex && p.box)
                     .map((p, pIdx) => {
                       if (!pageContainerRef.current) return null;
-                      const rect = pageContainerRef.current.getBoundingClientRect();
+                      const rect =
+                        pageContainerRef.current.getBoundingClientRect();
                       const scaleY = rect.height / currentPage.height;
                       const top = p.box[1] * scaleY;
                       const height = (p.box[3] - p.box[1]) * scaleY;
@@ -465,8 +496,12 @@ export default function MelodySlidePage() {
             <div className="p-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-1.5">
                 <Scissors size={14} className="text-brand-500" />
-                <span className="font-semibold text-xs text-slate-700">Slide Pieces</span>
-                <span className="text-[11px] text-slate-400 font-mono">({pieces.length})</span>
+                <span className="font-semibold text-xs text-slate-700">
+                  Slide Pieces
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  ({pieces.length})
+                </span>
               </div>
 
               {/* Lines per slide select */}
@@ -489,7 +524,8 @@ export default function MelodySlidePage() {
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {pieces.length === 0 ? (
                 <div className="p-6 text-center text-xs text-slate-400">
-                  No pieces detected. Use "Select &amp; Crop" on the left to highlight a melody line.
+                  No pieces detected. Use "Select &amp; Crop" on the left to
+                  highlight a melody line.
                 </div>
               ) : (
                 pieces.map((piece, idx) => (
@@ -582,10 +618,14 @@ export default function MelodySlidePage() {
             <div className="p-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-1.5">
                 <Eye size={14} className="text-brand-500" />
-                <span className="font-semibold text-xs text-slate-700">Projector Slide Preview</span>
+                <span className="font-semibold text-xs text-slate-700">
+                  Projector Slide Preview
+                </span>
               </div>
               <div className="text-xs text-slate-500 font-mono">
-                {pieces.length > 0 ? `${currentSlideIndex + 1} / ${pieces.length}` : "–"}
+                {pieces.length > 0
+                  ? `${currentSlideIndex + 1} / ${pieces.length}`
+                  : "–"}
               </div>
             </div>
 
@@ -621,7 +661,9 @@ export default function MelodySlidePage() {
                 <div className="flex items-center justify-center gap-3 mt-4">
                   <button
                     type="button"
-                    onClick={() => setCurrentSlideIndex((prev) => Math.max(0, prev - 1))}
+                    onClick={() =>
+                      setCurrentSlideIndex((prev) => Math.max(0, prev - 1))
+                    }
                     disabled={currentSlideIndex === 0}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30 shadow-xs transition"
                   >
@@ -635,7 +677,9 @@ export default function MelodySlidePage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setCurrentSlideIndex((prev) => Math.min(pieces.length - 1, prev + 1))
+                      setCurrentSlideIndex((prev) =>
+                        Math.min(pieces.length - 1, prev + 1),
+                      )
                     }
                     disabled={currentSlideIndex === pieces.length - 1}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30 shadow-xs transition"
@@ -657,7 +701,9 @@ export default function MelodySlidePage() {
                   className="w-6 h-6 rounded cursor-pointer border border-slate-300"
                   title="Slide Background Color"
                 />
-                <span className="font-mono text-[11px] text-slate-500">{bgColor}</span>
+                <span className="font-mono text-[11px] text-slate-500">
+                  {bgColor}
+                </span>
               </div>
 
               <button

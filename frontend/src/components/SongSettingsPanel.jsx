@@ -116,7 +116,7 @@ export default function SongSettingsPanel({ settings, onChange }) {
         />
         <ColorPicker
           label="Verse Number Color"
-          value={settings.verse_num_color || '#ffcc44'}
+          value={settings.verse_num_color || '#ef4444'}
           onChange={v => set('verse_num_color', v)}
         />
         <ColorPicker

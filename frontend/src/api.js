@@ -154,3 +154,43 @@ export async function generateMelodyPptx(payload) {
   }
   return res.blob()
 }
+
+// ── Slide Editor endpoints (bulk restyle an existing PPTX) ─────────
+
+/**
+ * Inspect an uploaded PPTX: slide count, per-slide summary + thumbnails.
+ * @param {File} file
+ * @returns {Promise<{slide_count, slides, thumbnails, filename, aspect}>}
+ */
+export async function inspectSlideDeck(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/slides/inspect`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Could not read PPTX')
+  }
+  return res.json()
+}
+
+/**
+ * Apply bulk formatting to every slide (or a selected subset).
+ * @param {File} file
+ * @param {object} settings  formatting to apply
+ * @param {number[]} slides  1-based indices, empty = all
+ * @param {boolean} preview  true → returns thumbnails instead of a blob
+ * @returns {Promise<Blob|{thumbnails: string[]}>}
+ */
+export async function applySlideRestyle(file, settings = {}, slides = [], preview = false) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('settings', JSON.stringify(settings))
+  form.append('slides', JSON.stringify(slides))
+  form.append('preview', preview ? 'true' : 'false')
+  const res = await fetch(`${BASE}/slides/apply`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Restyle failed')
+  }
+  return preview ? res.json() : res.blob()
+}

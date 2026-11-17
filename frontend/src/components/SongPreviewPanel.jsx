@@ -86,7 +86,7 @@ function SongSlideCanvas({ slide, settings }) {
               {/* Only letter R. is red color for Chorus; verse_num_color for verses */}
               <span
                 style={{
-                  color: isChorus ? (settings.chorus_r_color || '#ef4444') : (settings.verse_num_color || '#ffcc44'),
+                  color: isChorus ? (settings.chorus_r_color || '#ef4444') : (settings.verse_num_color || '#ef4444'),
                   fontWeight: 800,
                 }}
               >

@@ -26,7 +26,8 @@ const firebaseConfig = {
   messagingSenderId: "354565330550",
   // Fallback placeholder apiKey if not provided by env/storage
   apiKey:
-    typeof window !== "undefined" && window.localStorage.getItem("firebase_api_key")
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("firebase_api_key")
       ? window.localStorage.getItem("firebase_api_key")
       : "AIzaSyDummyKeyForImmanuelSongs354565330550",
 };

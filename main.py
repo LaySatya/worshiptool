@@ -12,6 +12,7 @@ import uuid
 import zipfile
 import base64
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -559,6 +560,202 @@ def _line_is_khmer(s: str) -> bool:
     return bool(_HAS_KHMER_RE.search(s))
 
 
+# ── Khmer spelling / script helpers ─────────────────────────────
+# Khmer combining signs that must attach to the preceding base character.
+# OCR output frequently inserts a space between a consonant and its vowel /
+# coeng / diacritic (e.g. "ស្ ត្រៃ" instead of "ស្ត្រី"), which reads as broken
+# spelling.  Any space that immediately follows (or precedes) one of these is
+# removed so the word is rejoined.
+_COMBINING_RE = re.compile(
+    r'[\u17B4-\u17D3\u17DD]'          # dependent vowels, signs & numerals
+    r'|\u17D2'                        # coeng (subscript marker)
+)
+
+# A leading dependent sign means the previous word was split — glue it back.
+# Two dependent signs may follow each other inside one cluster (e.g. អ + ា + ន
+# where OCR puts a space after the vowel), so the whole run is consumed.
+_SPACE_BEFORE_COMBINING_RE = re.compile(
+    r'\s+(?=[\u17B4-\u17D3]+)'
+)
+
+# Dependent vowel/diacritic followed by a space and then the next consonant of
+# the same syllable — "អា ន" -> "អាន".  Applied by _glue_incomplete() only when
+# the fragment before the space cannot be a complete Khmer word.
+# NOTE: coeng (\u17D2) is excluded — a space after a coeng is ALWAYS wrong.
+_SIGN_THEN_SPACE_RE = re.compile(
+    r'(?<=[\u17B4-\u17D3])\s+(?=[\u1780-\u17A2])'
+)
+
+
+_KHMER_CONSONANTS = set(chr(c) for c in range(0x1780, 0x17A3))
+
+# Dependent vowels (U+17B6..U+17C5), the ំ ះ signs (U+17C6, U+17C7) and
+# diacritics (U+17C8..U+17D3) — i.e. everything that attaches to a consonant.
+_KHMER_VOWELS_OR_SIGNS = set(
+    chr(c) for c in list(range(0x17B6, 0x17D4))
+)
+
+
+@lru_cache(maxsize=4096)
+def _is_incomplete_khmer_fragment(token: str) -> bool:
+    """
+    True when `token` is a syllable that OCR cut in half, i.e. the following
+    space is NOT a real word break.
+
+    Khmer syllables are written as:  consonant (coeng consonant)* vowel sign*.
+    If OCR drops the space the syllable breaks immediately after a consonant
+    that has no vowel attached yet, e.g.
+
+        "អ ា ន"      -> "អ" is a bare consonant            -> fragment
+        "ក្ ន"      -> trailing coeng without sub-consonant -> fragment
+        "ស្ ត្រី"    -> trailing coeng                      -> fragment
+        "ព្រ ះ"      -> trailing coeng                      -> fragment
+
+    A real Khmer word ends with a vowel sign or a bare consonant-letter that
+    IS a word ("ខ្ញុំ", "ចូល", "ទៅ", "ស្រឡាញ់") — those are left untouched.
+
+    Only UNAMBIGUOUS split markers are flagged, so a real word is never glued
+    onto its neighbour:
+
+      • the token ends with the coeng marker (\u17D2) — a coeng can never end
+        a word, so the next cluster continues the same syllable ("ស្ត្រី ស្");
+      • the token is a LONE dependent sign ("ា", "ំ", "់") — it cannot stand
+        on its own, so it belongs to the previous cluster.
+
+    Nothing else is touched.  That means languages with legitimate one-letter
+    words, and every normal word break, are preserved exactly as OCR saw them.
+    """
+    if not token:
+        return False
+    if token.endswith('\u17D2'):
+        return True                      # dangling coeng -> never a word end
+    if len(token) == 1 and token not in _KHMER_CONSONANTS:
+        return True                      # lone vowel sign / diacritic
+    return False
+
+# Coeng followed by an optional space before its sub-consonant.
+_COENG_SPACE_RE = re.compile(r'\u17D2\s+(?=[\u1780-\u17A2])')
+
+# Dependent vowel signs only (U+17B6..U+17C5) — used to spot a vowel-final
+# syllable that OCR cut off before its closing consonant.
+_KHMER_VOWELS = set(chr(c) for c in range(0x17B6, 0x17C6))
+
+# Very common Khmer words that OCR frequently splits into two fragments.
+# Re-joining is safe because the fragments are not independent words.
+# (Order matters only for readability — matches are on the joined result.)
+_KHMER_SPLIT_WORDS: dict[str, tuple[str, ...]] = {
+    "ដែល": ("ដ ែល", "ដែ ល", "ដែ ល"),
+    "មាន": ("មា ន", "ម ាន"),
+    "គឺ": ("គ ឺ",),
+    "នេះ": ("នេ ះ", "ន េះ"),
+    "នោះ": ("នោ ះ", "ន ោះ"),
+    "ទាំង": ("ទា ំង", "ទ ំាង"),
+    "យើង": ("យ ើង", "យើ ង"),
+    "ព្រះ": ("ព្រ ះ", "ព្ រះ"),
+    "គ្រិស្ត": ("គ្រិ ស្ត", "គ្រ ិស្ត"),
+    "អម្ចាស់": ("អម្ចា ស់", "អ ម្ចាស់"),
+    "ក្នុង": ("ក្នុ ង", "ក្ន ំង"),
+}
+
+
+# Whole-word split repairs: "មា ន" -> "មាន".  These are ordinary words whose
+# two halves are not separate words, so the space is always OCR noise.
+_WORD_SPLIT_PAIRS: list[tuple[re.Pattern, str]] = [
+    (re.compile(re.escape(frag)), word)
+    for word, frags in _KHMER_SPLIT_WORDS.items()
+    for frag in frags
+]
+
+
+def _fix_khmer_spacing(s: str) -> str:
+    """
+    Re-join Khmer clusters that OCR split with stray whitespace.
+
+    "ស្ត្រី សូរយើង"  -> fine (space between words)
+    "ស្ ត្រៃសូរ យើង" -> "ស្ត្រៃសូរយើង" (spaces inside a cluster removed)
+    "បែរ ចិត្ត ំ"      -> "បែរចិត្តំ"    (lone combining sign re-attached)
+    "អ ា ន"           -> "អាន"
+    "ក ់"            -> "ក់"
+    "ក្រ ែង"         -> "ក្រែង"
+    "ក្ ន"           -> "ក្ន"
+    "១ ។"            -> "១។"
+    "ព្រ ៖"          -> "ព្រ៖"
+    "ខ្ញុំ ចូល ទៅ ក្នុង" -> unchanged (real word spacing is kept)
+    """
+    if not s:
+        return s
+    # A token ending in a dependent sign that is NOT a complete word is an
+    # incomplete syllable; the following consonant belongs to it
+    # ("អា ន" -> "អាន").  Real words are left untouched ("ខ្ញុំ ចូល").
+    def _glue_incomplete(m: re.Match) -> str:
+        start = m.start()
+        j = start
+        while j > 0 and not s_prev[j - 1].isspace():
+            j -= 1
+        token = s_prev[j:start]
+        if not token:
+            return m.group(0)
+        if _is_incomplete_khmer_fragment(token):
+            return ''
+        # Short vowel-final fragment + a following fragment-looking next token
+        # is a syllable split mid-way ("អា ន", "សើ យើង").  Rejoin only when the
+        # next token is itself short (1-2 chars), so real words stay separate.
+        k = start
+        while k < len(s_prev) and s_prev[k].isspace():
+            k += 1
+        e = k
+        while e < len(s_prev) and not s_prev[e].isspace():
+            e += 1
+        nxt = s_prev[k:e]
+        if (
+            len(token) == 2
+            and token[0] in _KHMER_CONSONANTS
+            and token[-1] in _KHMER_VOWELS
+            and nxt
+            # next token must not be a real independent word (2+ chars starting
+            # with a consonant is a word, so leave it alone)
+            and len(nxt) <= 2
+        ):
+            return ''
+        # NOTE: a 2-char consonant+vowel token ("សើ", "ទៅ") is indistinguishable
+        # from a real one-word break, so it is deliberately left alone rather
+        # than risking gluing two genuine words together.
+        return m.group(0)
+
+    s_prev = s
+    s = _SIGN_THEN_SPACE_RE.sub(_glue_incomplete, s_prev)
+    # coeng + space + sub-consonant -> coeng + sub-consonant
+    s = _COENG_SPACE_RE.sub('\u17D2', s)
+    # space before a dependent vowel / diacritic -> remove it
+    s = _SPACE_BEFORE_COMBINING_RE.sub('', s)
+
+    # A trailing syllable-final mark (់ ៈ ៉ ៊ ់ ៌ ៍ ៎ ៏ ័ ៑ ...) may never
+    # follow a space: the space was inserted INSIDE the syllable.
+    #
+    #     "អម្ចា ស់"  ->  "អម្ចាស់"
+    #     "ណា ក់"    ->  "ណាក់"
+    #
+    # Only ់ (U+17CB, the syllable-final consonant mark) is treated as a split
+    # marker.  It can never begin a Khmer word, so a space before
+    # "consonant + ់" is always an OCR glitch.
+    #
+    # Deliberately NOT included:
+    #   ៏ U+17CF — real words begin with it, e.g. "ដ៏" (that/which)
+    #    ្ U+17D2 — "ក្នុង" legitimately starts with a subscript cluster
+    #   ំ ះ — "ដំណឹង", "ព្រះ" are ordinary word starts
+    s = re.sub(r'\s+(?=[\u1780-\u17A2]\u17CB)', '', s)
+    # …and a space directly before a dependent sign is equally invalid.
+    s = re.sub(r'\s+(?=[\u17B4-\u17D3])', '', s)
+    # Khmer sentence/clause marks never stand alone after a space
+    s = re.sub(r'\s+([\u17D4-\u17DA])', r'\1', s)
+    # Repair common words that OCR split into two fragments ("មា ន" -> "មាន").
+    for pat, word in _WORD_SPLIT_PAIRS:
+        s = pat.sub(word, s)
+    # Collapse the gaps left behind
+    s = re.sub(r'\s{2,}', ' ', s)
+    return s.strip()
+
+
 def _khmer_char_count(s: str) -> int:
     return len(_KHMER_CHAR_RE.findall(s))
 
@@ -591,8 +788,40 @@ def _has_repeated_bigram(tokens: list, max_frac: float = 0.40) -> bool:
 
 
 # OCR noise characters to strip from lyric lines before filtering
-# These are common misreads: slashes, angles, brackets, punctuation artifacts
-_OCR_NOISE_RE = re.compile(r'[/\\<>«»›‹|(){}\[\]#@&*^~`]+')
+# These are common misreads: slashes, angles, brackets, punctuation artifacts.
+# NOTE: Khmer punctuation (។ ៕ ៖ ៗ …) is deliberately NOT listed here.
+# NOTE: '~' is NOT noise — a hymn verse marker is written "១~" and stripping
+# it produces "១  នៅពេញ..." in the final text.
+_OCR_NOISE_RE = re.compile(r'[/\\<>«»›‹|(){}\[\]#@&*^`]+')
+
+# OCR output normalisation: ASCII punctuation used where Khmer punctuation
+# belongs.  Only very safe, well-known substitutions are applied.
+_OCR_MARK_FIXES: list[tuple[re.Pattern, str]] = [
+    # Repeated full stop ".." is OCR for the Khmer full stop
+    (re.compile(r'\.{2,}'), '\u17D4'),                     # ។
+    # Full-width / look-alike punctuation normalised to ASCII
+    (re.compile(r'[，、]'), ','),
+    (re.compile(r'[；]'), ';'),
+    # A ':' printed straight after a Khmer consonant is OCR for ះ (U+17C7),
+    # as in "ព្រ:គុណ" for "ព្រះគុណ".  A real colon in Khmer text is ៖ (U+17D6)
+    # and never follows a consonant without a space, so this is unambiguous.
+    (re.compile(r'(?<=[\u1780-\u17A2])\s*[:ៈ]'), '\u17C7'),
+]
+
+# Repetition mark ៗ (U+17D7): OCR commonly prints a quote character after the
+# repeated syllable.  Handled with a callable so the group reference and the
+# literal Khmer codepoint can be combined safely (a '\\1\u17D7' template is
+# rejected by Python's re module as a bad escape).
+_REPEAT_MARK_RE = re.compile(r'([\u1780-\u17A2])["“”]')
+_REPEAT_MARK = '\u17D7'
+
+
+def _normalise_ocr_marks(s: str) -> str:
+    """Restore Khmer punctuation that OCR replaced with ASCII symbols."""
+    for pat, repl in _OCR_MARK_FIXES:
+        s = pat.sub(repl, s)
+    s = _REPEAT_MARK_RE.sub(lambda m: m.group(1) + _REPEAT_MARK, s)
+    return s
 
 # Token-level smear detection regexes (compiled once at module level)
 _LATIN_RE      = re.compile(r'[a-zA-Z]')
@@ -606,98 +835,209 @@ def _clean_line(s: str) -> str:
     Also collapses multiple spaces.
     """
     s = _OCR_NOISE_RE.sub(' ', s)
+    s = _normalise_ocr_marks(s)
+    s = _fix_khmer_spacing(s)
     s = re.sub(r' {2,}', ' ', s)
     return s.strip()
+
+
+def _syllable_evidence(s: str) -> int:
+    """
+    Count how many genuine Khmer syllables `s` contains.
+
+    A written Khmer syllable is a base consonant (optionally followed by coeng
+    sub-consonants) plus optional vowel signs.  Real lyrics are made of these;
+    notation/solfege rows and OCR smear produce runs with no base consonant at
+    all (only vowel signs and diacritics), or endless coeng chains.
+
+    This works even when the whole line has no spaces, which is common for
+    Khmer song lyrics.
+
+    Returns the number of syllables detected.
+    """
+    count = 0
+    i = 0
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if c in _KHMER_CONSONANTS:
+            j = i + 1
+            # absorb coeng + sub-consonant pairs, then vowel signs / diacritics
+            while j < n:
+                if s[j] == '\u17D2' and j + 1 < n and s[j + 1] in _KHMER_CONSONANTS:
+                    j += 2
+                elif s[j] in _KHMER_VOWELS_OR_SIGNS:
+                    j += 1
+                else:
+                    break
+            count += 1
+            i = j
+        else:
+            i += 1
+    return count
+
+
+_SOLFEGE_VOWEL = '\u17B8'   # ី (ii) — every note name ends with it
+
+# Known Khmer note names (do re mi fa sol la ti) as written in hymn books
+_SOLFEGE_NAMES = {
+    'ដូ', 'ឌូ', 'រី', 'មី', 'ហ្វា', 'ហ្វា', 'សូ', 'ឡា', 'ធី', 'វី',
+}
+
+
+def _split_khmer_syllables(s: str) -> list[str]:
+    """Split a Khmer string into written syllables (base + marks + coeng)."""
+    out: list[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c in _KHMER_CONSONANTS:
+            j = i + 1
+            while j < n:
+                if s[j] == '\u17D2' and j + 1 < n and s[j + 1] in _KHMER_CONSONANTS:
+                    j += 2
+                elif s[j] in _KHMER_VOWELS_OR_SIGNS:
+                    j += 1
+                else:
+                    break
+            out.append(s[i:j])
+            i = j
+        else:
+            i += 1
+    return out
+
+
+_KHMER_DIGITS_SET = set("០១២៣៤៥៦៧៨៩")
+
+
+def _fix_verse_marker(s: str) -> str:
+    """
+    Repair a verse number that OCR merged with the '~' / '.' separator.
+
+    In hymn books a verse starts with "១~" or "1.".  OCR frequently reads the
+    '~' as another digit, giving "១០~..." / "១០នៅ..." — a wrong verse number.
+
+    Rules applied only at the START of a line:
+      • "១០" / "១៣" etc. followed by a word -> keep the first digit only
+        (verse numbers never run into the lyric without a separator)
+      • strip a trailing '~' or '.' left in the text
+    """
+    # A verse may start with digits and no separator at all ("១០នៅ..." where
+    # the '~' was read as ០).  Match the digit run optionally followed by a
+    # separator, and require Khmer text immediately after it.
+    m = re.match(r'^([០-៩0-9]+)\s*([~\.\:\)])?\s*(?=[\u1780-\u17FF])', s)
+    if not m:
+        return s
+    num = m.group(1)
+    sep = m.group(2)
+    rest = s[m.end():]
+    if not rest:
+        return s
+
+    # A real separator was recognised -> keep it exactly as printed
+    # ("២." must stay "២.").  Only invent a '~' when none was found.
+    if sep:
+        return num + sep + rest
+
+    # No separator: the lyric runs straight into the digits.  A Khmer verse
+    # number is a single digit, so keep the first.
+    if len(num) >= 2:
+        num = num[0]
+    return num + '~' + rest
+
+
+def _is_solfege_row(s: str) -> bool:
+    """
+    True when the line is a melody-notation row rather than lyrics.
+
+    Detection: the line has at least 4 syllables, and >= 60 % of them are
+    short solfege notes — either a known note name (រី / មី / ហ្វា / ឌូ ...)
+    or a very short syllable ending in the 'ី' vowel.
+    """
+    syls = _split_khmer_syllables(s)
+    if len(syls) < 4:
+        return False
+    note_like = 0
+    for syl in syls:
+        bare = syl.rstrip(''.join(_KHMER_VOWELS_OR_SIGNS) + '\u17D2')
+        if syl in _SOLFEGE_NAMES:
+            note_like += 1
+        elif len(syl) <= 4 and syl.endswith(_SOLFEGE_VOWEL):
+            note_like += 1
+    return note_like / len(syls) >= 0.60
 
 
 def _is_lyric_line(s: str) -> bool:
     """
     Return True only if this line looks like a genuine Khmer lyric line.
 
+    IMPORTANT: Khmer lyrics are frequently written WITHOUT spaces between
+    words (and OCR often drops them anyway), so a valid line can arrive as ONE
+    single unbroken Khmer token.  The gates below are therefore based on the
+    STRUCTURE of the script (consonant/vowel rhythm, repetition, density) and
+    never on "how many space-separated words are there".
+
     Rejection criteria (any one -> reject):
       1. No Khmer characters at all.
-      2. Fewer than 6 Khmer characters.
-      3. Top-1 Khmer char >= 45 % (repetitive OCR smear).
-      4. Top-3 Khmer chars >= 72 % (solfege / rhythm notation).
-      5. Fewer than 2 whitespace-separated Khmer word tokens.
-      6. 2-3 tokens AND avg token length < 4.5 chars
-         (short instrument-label / tab marker).
-      7. Average Khmer token length < 2.5 chars (pure notation markers).
-      8. Two consecutive identical Khmer tokens (rhythm: "i i", "pi pi").
-      9. Repeated bigrams across the line (rhythm notation rows).
-     10. >= 60 % of tokens end with Khmer vowel sign ii (\u17B8 = \u17b8 = i-vowel)
-         -> solfege syllable row (pii, kii, rii, sii...).
-     11. >= 50 % of tokens are exactly 2 chars (solfege syllables).
-     12. Khmer chars < 55 % of all non-space chars (mixed notation/ascii).
+      2. Fewer than 4 Khmer characters (stray glyph noise).
+      3. Repetitive character distribution (OCR smear / solfege).
+      4. Khmer chars < 55 % of all non-space chars (mixed notation/ascii).
+      5. Notation-only line: almost no real syllables (see _syllable_evidence).
+      6. Repeating 2-3 char pattern run ("ោយោយោយ", "a ba a ba").
+      7. A long line whose character bigrams are dominated by one pair
+         (staff-line / rhythm notation run).
     """
     if not _line_is_khmer(s):
         return False
 
     k_count = _khmer_char_count(s)
-    if k_count < 6:
+    if k_count < 4:
         return False
 
     if _is_repetitive(s):
         return False
 
-    khmer_word_tokens = [t for t in s.split() if _line_is_khmer(t)]
-    n_tokens = len(khmer_word_tokens)
-
-    if n_tokens < 2:
+    # Khmer density gate — notation rows are mostly ASCII / symbols
+    total_chars = len(s.replace(' ', ''))
+    if total_chars > 0 and k_count / total_chars < 0.55:
         return False
 
-    avg_word_len = sum(len(t) for t in khmer_word_tokens) / n_tokens
-
-    # Short instrument-label gate: <= 3 tokens with short avg length
-    if n_tokens <= 3 and avg_word_len < 4.5:
+    # A real Khmer lyric line contains several proper consonant+vowel
+    # syllables.  Pure notation / solfege rows contain almost none.
+    if _syllable_evidence(s) < 2:
         return False
 
-    # General avg-length floor
-    if avg_word_len < 2.5:
+    # Solfege / note-name row (រី មី វី ហ្វា ឌូ ...).  These are SHORT syllables
+    # built from a consonant + the 'ី' vowel (or a '្វ'-cluster), repeated many
+    # times.  Real lyrics use a much wider variety of shapes.
+    if _is_solfege_row(s):
         return False
 
-    # Consecutive identical tokens
-    for i in range(n_tokens - 1):
-        if khmer_word_tokens[i] == khmer_word_tokens[i + 1]:
-            return False
+    tokens = s.split()
 
-    # Repeated bigrams
-    if _has_repeated_bigram(khmer_word_tokens):
-        return False
-
-    # Solfege gate 1: >= 60% of tokens end with ii-vowel sign (U+17B8)
-    # Real Khmer words rarely end with ii; solfege syllables always do
-    ii_vowel = '\u17B8'
-    ii_end_frac = sum(1 for t in khmer_word_tokens if ii_vowel in t[-2:]) / n_tokens
-    if ii_end_frac >= 0.60:
-        return False
-
-    # Solfege gate 2: >= 50% of tokens are exactly 2 chars
-    short2_frac = sum(1 for t in khmer_word_tokens if len(t) == 2) / n_tokens
-    if short2_frac >= 0.50:
-        return False
-
-    # Token-level smear gates: reject if ANY token looks like notation smear
-    for tok in khmer_word_tokens:
-        # Mixed Khmer+Latin in one token -> OCR smear of staff lines
-        if _LATIN_RE.search(tok) and _KHMER_CHAR_RE.search(tok):
-            return False
-        # Repeated 2–3 char substring pattern -> notation run (e.g. ោយោយោយ)
+    # Repeating short pattern run: "ោយោយោយ", "កាកាកា"
+    for tok in tokens:
         if len(tok) >= 6 and _REPEAT_SUB_RE.search(tok):
             return False
-        # Long token with highly repetitive character bigrams -> notation run
-        if len(tok) >= 7:
+
+    # Long token dominated by a single character bigram -> notation run.
+    # A genuine Khmer word mixes many different clusters.
+    for tok in tokens:
+        if len(tok) >= 14:
             chars = list(tok)
             bigrams = [chars[i] + chars[i+1] for i in range(len(chars)-1)]
             if bigrams:
                 top_bg_count = Counter(bigrams).most_common(1)[0][1]
-                if top_bg_count / len(bigrams) >= 0.22:
+                if top_bg_count / len(bigrams) >= 0.30:
                     return False
 
-    # Khmer density gate
-    total_chars = len(s.replace(' ', ''))
-    if total_chars > 0 and k_count / total_chars < 0.55:
-        return False
+    # Rhythm rows written as identical repeated syllables ("pi pi pi pi")
+    if len(tokens) >= 4:
+        for i in range(len(tokens) - 1):
+            if tokens[i] == tokens[i + 1] and len(tokens[i]) <= 3:
+                return False
+        if _has_repeated_bigram(tokens):
+            return False
 
     return True
 
@@ -760,31 +1100,76 @@ def _get_tesseract() -> str:
 
 # ── Image pre-processing ────────────────────────────────────────
 
-def _preprocess_for_ocr(img: Image.Image, target_width: int = 2800) -> Image.Image:
+# Tesseract's LSTM engine degrades badly (and can return NOTHING) on very
+# large images.  Anything above this width is downscaled first — accuracy is
+# actually BETTER at ~2500-4000 px than at 6000+ px.
+_MAX_OCR_WIDTH = 3600
+_MAX_OCR_HEIGHT = 4800
+
+
+def _limit_ocr_size(img: Image.Image) -> Image.Image:
     """
-    Prepare a lyric-strip image for Tesseract (Khmer-optimised):
+    Downscale an image so Tesseract can actually process it.
+
+    The scale factor is computed from BOTH dimensions and applied to both, so
+    the aspect ratio is preserved.  (Clamping width and height independently
+    squashes wide, short lyric strips and destroys the glyph shapes.)
+    """
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return img
+    scale = min(_MAX_OCR_WIDTH / w, _MAX_OCR_HEIGHT / h, 1.0)
+    if scale < 1.0:
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+    return img
+
+
+def _preprocess_for_ocr(img: Image.Image, target_width: int = 2400) -> Image.Image:
+    """
+    Prepare a lyric-strip image for Tesseract (Khmer-optimised).
+
+    Measured behaviour of Tesseract's Khmer model:
+      • It reads Khmer perfectly when glyph height is ~30-55 px.
+      • Accuracy collapses above roughly 64 px per glyph ("ស្ត" -> "សព្ត")
+        and on extreme aspect ratios (a 2600x181 strip failed completely).
+
+    So the image is scaled ONCE, proportionally, to land glyph height in the
+    sweet spot — never stretched on one axis, which distorts every syllable.
 
       1. Greyscale
-      2. Upscale so the longest dimension ≥ target_width px
-         (Khmer vowel signs need glyph height ≥ 50 px to be read correctly)
+      2. Proportional resize so the strip is at most TARGET_W wide AND the
+         text line is a comfortable height (both limits, same scale factor)
       3. Auto-contrast (stretch histogram to full 0-255 range)
-      4. Unsharp-mask (crisper edges than double-SHARPEN, doesn't over-thicken)
-      5. Adaptive binarise via numpy:
-           - Compute local mean in a 41-px window
-           - Threshold = local_mean - 18  (handles uneven lighting / shadows)
-           - This preserves faint vowel signs that hard-threshold at 150 erases
-      6. Light despeckle: remove isolated dark pixels smaller than 2×2
-      7. White border (Tesseract hates glyphs at the very edge)
+      4. Unsharp-mask (crisper edges, doesn't over-thicken thin strokes)
+      5. Otsu binarise (global threshold — robust on clean printed lyrics and
+         does not erode the thin strokes the way local-mean did)
+      6. White border (Tesseract hates glyphs at the very edge)
     """
     img = img.convert("L")
-    w, h = img.size
 
-    # Step 2 — upscale
-    if w < target_width:
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return img
+
+    # Step 2 — ONE proportional scale.
+    #   • cap the width so Tesseract's layout analyser can cope
+    #   • boost small text so glyph height reaches a readable size
+    scale = 1.0
+    if w > target_width:
         scale = target_width / w
-        new_w = int(w * scale)
-        new_h = max(int(h * scale), 80)   # ensure min height for vowel signs
+    elif h < 40:
+        # A very short strip (thin line of text) — enlarge it proportionally
+        scale = min(60.0 / h, target_width / w)
+
+    if abs(scale - 1.0) > 1e-3:
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
         img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Guard: never exceed Tesseract's comfortable size on EITHER axis
+    img = _limit_ocr_size(img)
 
     # Step 3 — auto-contrast
     img = ImageOps.autocontrast(img, cutoff=2)
@@ -792,16 +1177,35 @@ def _preprocess_for_ocr(img: Image.Image, target_width: int = 2800) -> Image.Ima
     # Step 4 — unsharp mask (radius 2, percent 150, threshold 3)
     img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
 
-    # Step 5 — adaptive binarise
-    arr = np.array(img, dtype=np.float32)
-    from scipy.ndimage import uniform_filter
-    try:
-        local_mean = uniform_filter(arr, size=41)
-        binary = (arr > (local_mean - 18)).astype(np.uint8) * 255
-    except ImportError:
-        # scipy not available → fall back to simple threshold at 140
-        binary = (arr > 140).astype(np.uint8) * 255
-    img = Image.fromarray(binary.astype(np.uint8), mode="L")
+    # Step 5 — Otsu binarise.
+    #   A global threshold keeps thin Khmer strokes intact.  The previous
+    #   local-mean threshold (mean - 18) eroded them and turned "ស្ត" into "សព្ត".
+    arr = np.array(img, dtype=np.uint8)
+    hist = np.bincount(arr.ravel(), minlength=256).astype(np.float64)
+    total = arr.size
+    if total:
+        sum_all = float(np.dot(np.arange(256), hist))
+        sum_b = 0.0
+        w_b = 0.0
+        best_var = -1.0
+        thr = 127
+        for i in range(256):
+            w_b += hist[i]
+            if w_b == 0:
+                continue
+            w_f = total - w_b
+            if w_f == 0:
+                break
+            sum_b += i * hist[i]
+            m_b = sum_b / w_b
+            m_f = (sum_all - sum_b) / w_f
+            var = w_b * w_f * (m_b - m_f) ** 2
+            if var > best_var:
+                best_var = var
+                thr = i
+    else:
+        thr = 127
+    img = Image.fromarray(((arr > thr) * 255).astype(np.uint8), mode="L")
 
     # Step 6 — light despeckle: erode then dilate (opening) to remove 1-px noise
     img = img.filter(ImageFilter.MinFilter(3))   # erode (dark = ink)
@@ -898,11 +1302,15 @@ def _is_staff_strip(gray: np.ndarray, top: int, bot: int,
         return True
 
     # Signal 2: high overall density (lots of ink — notes + beams) AND
-    #           uniform density variance (regular pattern of staff lines)
+    #           uniform density variance (regular pattern of staff lines).
+    #           Guards: a real staff band is TALL (5 staff lines + note heads
+    #           span >= 40 px at 150 dpi) and contains at least 3 rows with
+    #           long horizontal runs.  A single line of large title text would
+    #           otherwise be misread as notation.
     arr_d = np.array(row_densities)
     mean_d = float(arr_d.mean())
     std_d  = float(arr_d.std())
-    if mean_d > 0.08 and std_d < 0.06:
+    if mean_d > 0.08 and std_d < 0.06 and h_band >= 36 and long_run_rows >= 3:
         return True
 
     return False
@@ -932,41 +1340,213 @@ def _detect_content_strips(gray: np.ndarray,
     return strips
 
 
+def _classify_strips(page_rgb: Image.Image) -> dict:
+    """
+    Split a music-sheet page into three kinds of horizontal region:
+
+      title   — the song-title block at the TOP of the page (song number,
+                Khmer title, and often a Korean / English subtitle).  This is
+                NOT lyric text: it becomes a picture on the first slide.
+      music   — staff / melody notation rows (and solfege note rows).
+      lyrics  — the Khmer lyric lines that sit UNDER the melody.
+
+    Returns {"title": crop|None, "lyrics": [crop, ...], "has_music": bool,
+             "lyric_bands": [(top,bot), ...]}
+
+    The rule is positional: everything above the FIRST melody row is the
+    title block.  Everything below it that is not itself notation is lyrics.
+    """
+    gray = np.array(page_rgb.convert("L"))
+    h, w = gray.shape
+
+    result = {"title": None, "title_band": None, "lyrics": [],
+              "has_music": False, "lyric_bands": []}
+
+    strips = _detect_content_strips(gray)
+    if len(strips) < 2:
+        # Flat / photocopied page — no structure to exploit.
+        return result
+
+    # 1. Label every strip as music or not
+    labelled: list[tuple[int, int, bool]] = []
+    for top, bot in strips:
+        is_music = _is_staff_strip(gray, top, bot, page_width=w)
+        labelled.append((top, bot, is_music))
+
+    first_music_idx = next((i for i, (_, _, m) in enumerate(labelled) if m), None)
+    result["has_music"] = first_music_idx is not None
+
+    # 2. Title block = all non-music strips ABOVE the first melody row.
+    if first_music_idx is not None and first_music_idx > 0:
+        head = labelled[:first_music_idx]
+        t = max(0, head[0][0] - 12)
+        b = min(h, head[-1][1] + 12)
+        # Only treat it as a title when it is a compact block, not most of
+        # the page (a lyric-only page has no title block).
+        if (b - t) <= h * 0.42:
+            result["title"] = page_rgb.crop((0, t, w, b))
+            result["title_band"] = (t, b)
+
+    # 3. Lyrics = non-music strips BELOW the first melody row.
+    #
+    #    IMPORTANT: pad vertically only into BLANK space.  A fixed pad pulls
+    #    in the neighbouring staff lines / note heads, and OCR then reads them
+    #    as noise ("- -- »\"- ... ដល់មនុស្ស...").  So the pad is clipped to the
+    #    gap between this strip and the music rows around it.
+    start_idx = first_music_idx if first_music_idx is not None else 0
+    base_pad = 22          # room for Khmer vowel signs above/below the baseline
+    for idx in range(start_idx, len(labelled)):
+        top, bot, is_music = labelled[idx]
+        if is_music:
+            continue
+
+        # How far can we expand before hitting a music strip or page edge?
+        up_limit = 0
+        for k in range(idx - 1, -1, -1):
+            if labelled[k][2]:           # music strip directly above
+                up_limit = labelled[k][1]
+                break
+        down_limit = h
+        for k in range(idx + 1, len(labelled)):
+            if labelled[k][2]:           # music strip directly below
+                down_limit = labelled[k][0]
+                break
+
+        t = max(up_limit, top - base_pad)
+        b = min(down_limit, bot + base_pad)
+        crop = page_rgb.crop((0, t, w, b))
+
+        # Scrub residual staff lines only.  Do NOT try to crop further to a
+        # "text band": Khmer vowel signs occupy the same rows as note heads, so
+        # any row-trimming erases the diacritics and shreds the word.  Leftover
+        # note heads are removed by the text filter after OCR instead.
+        crop = _erase_staff_lines(crop)
+
+        result["lyrics"].append(crop)
+        result["lyric_bands"].append((top, bot))
+
+    return result
+
+
+def _erase_staff_lines(img: Image.Image) -> Image.Image:
+    """
+    Whitened out any full-width horizontal rules (staff lines) accidentally
+    included in a lyric crop, and drop isolated specks (note heads).
+    """
+    gray = np.array(img.convert("L"))
+    h, w = gray.shape
+    if h == 0 or w == 0:
+        return img
+
+    dark = gray < 170
+    # A staff line: dark on > 55 % of the row, in one long run.
+    row_frac = dark.mean(axis=1)
+    staff_rows = np.where(row_frac > 0.55)[0]
+
+    out = gray.copy()
+    if len(staff_rows):
+        for r in staff_rows:
+            lo = max(0, r - 2)
+            hi = min(h, r + 3)
+            out[lo:hi, :] = 255
+
+    # NOTE: do NOT try to trim "specks" by density banding — Khmer vowel signs
+    # sit on the same rows as note heads and get erased with them, destroying
+    # the lyric.  Staff lines are already removed above; any remaining note
+    # heads are handled by the text filter after OCR.
+    return Image.fromarray(out).convert(img.mode)
+
+
+def _crop_to_text_band(img: Image.Image) -> Image.Image:
+    """
+    Tighten a lyric crop to the single row-range that actually holds text.
+
+    Called after the crop already contains exactly one lyric line plus, at the
+    edges, leftovers from the neighbouring staff (note heads or the tail of the
+    line above).  Those leftovers both break OCR and inject junk like
+    '” “””” ” ” ”“”'.
+
+    Instead of guessing from ink density (which erases Khmer vowel signs), this
+    uses the fact that TEXT spans a wide horizontal extent with many separate
+    strokes, while note heads are small isolated round blobs:
+
+      • count horizontal runs of dark pixels per row
+      • a text row has many runs (one per letter stroke) AND a wide bounding
+        extent; a note-head row has few runs / narrow extent
+      • keep the longest contiguous block of text-like rows
+    """
+    gray = np.array(img.convert("L"))
+    h, w = gray.shape
+    if h < 4 or w < 4:
+        return img
+
+    dark = gray < 180
+    run_counts = np.zeros(h, dtype=int)
+    extents = np.zeros(h, dtype=float)
+
+    for r in range(h):
+        row = dark[r]
+        if not row.any():
+            continue
+        # number of dark->light transitions = number of separate strokes
+        d = np.diff(row.astype(np.int8))
+        run_counts[r] = int(np.count_nonzero(d == 1))
+        xs = np.where(row)[0]
+        extents[r] = (xs[-1] - xs[0]) / w if len(xs) else 0.0
+
+    # A real lyric row: many strokes spread across most of the crop width.
+    text_like = (run_counts >= 14) & (extents >= 0.35)
+
+    if not text_like.any():
+        return img
+
+    rows = np.where(text_like)[0]
+    # Split into contiguous groups (allow 2-row gaps for vowel signs)
+    breaks = np.where(np.diff(rows) > 3)[0]
+    groups = np.split(rows, breaks + 1)
+
+    # Prefer the group with the widest horizontal extent (the lyric line),
+    # falling back to the longest group.
+    def score(g):
+        return (float(np.mean(extents[g])), len(g))
+    band = max(groups, key=score)
+
+    t = max(0, int(band[0]) - 4)
+    b = min(h, int(band[-1]) + 5)
+    return img.crop((0, t, w, b))
+
+
 def _extract_lyric_strips(page_rgb: Image.Image) -> list[Image.Image]:
     """
-    Return cropped PIL images of ONLY the lyric (Khmer text) rows from
-    a music sheet page, discarding all notation/staff rows.
+    Return cropped PIL images of ONLY the lyric (Khmer text) rows that sit
+    UNDER the melody notation, discarding the title block and all staff rows.
 
-    Algorithm:
-      1. Detect all horizontal content strips (separated by white gaps).
-      2. For each strip, run _is_staff_strip() to detect notation rows
-         using long-horizontal-run analysis.
-      3. Any strip NOT identified as staff is a candidate lyric row.
-      4. Safety: if zero lyric strips found (flat/photocopied page),
-         return [] so the caller falls back to full-page OCR + text filter.
+    Falls back to "every non-notation strip" when no melody row is present
+    (a plain lyric sheet), so ordinary text-only pages still work.
     """
-    gray  = np.array(page_rgb.convert("L"))
-    h, w  = gray.shape
+    info = _classify_strips(page_rgb)
+    if info["lyrics"]:
+        return info["lyrics"]
 
+    # No melody detected at all -> treat non-music strips as lyrics.
+    gray = np.array(page_rgb.convert("L"))
+    h, w = gray.shape
     strips = _detect_content_strips(gray)
     if len(strips) < 2:
         return []
 
-    lyric_crops: list[Image.Image] = []
+    title_band = info.get("title_band")
+    crops: list[Image.Image] = []
+    pad = 24
     for top, bot in strips:
         if _is_staff_strip(gray, top, bot, page_width=w):
-            continue   # skip notation / staff row entirely
-
-        # This strip is NOT staff → it's lyrics (or chord symbols which
-        # we'll filter at the text level after OCR).
-        # Use generous vertical padding so vowel signs above/below baseline
-        # are never clipped (Khmer stacks go well above and below the base row).
-        pad = 24
+            continue
+        if title_band and not (bot < title_band[0] or top > title_band[1]):
+            continue   # this strip is part of the title block
         t = max(0, top - pad)
         b = min(h, bot + pad)
-        lyric_crops.append(page_rgb.crop((0, t, w, b)))
-
-    return lyric_crops
+        crops.append(page_rgb.crop((0, t, w, b)))
+    return crops
 
 
 # ── OCR helpers ──────────────────────────────────────────────────
@@ -991,18 +1571,99 @@ _STRIP_NON_KHMER_IN_WORD_RE = re.compile(
 )
 
 
+def _trim_edge_junk(s: str) -> str:
+    """
+    Strip OCR junk from the START and END of a line.
+
+    When a lyric crop picks up a neighbouring staff, OCR emits the note heads as
+    symbols before/after the real text, e.g.
+
+        '˝ ” “””” ” ” ”“” ដល់មនុស្សជាច្រើននៅគ្រប់ជាតិសាសន៍ “” ” '
+
+    The lyric itself is intact in the middle, so everything outside the first
+    and last Khmer character is removed (keeping a verse marker before it and
+    Khmer punctuation after it).
+    """
+    first = None
+    for i, c in enumerate(s):
+        if _KHMER_CHAR_RE.match(c):
+            first = i
+            break
+    if first is None:
+        return s.strip()
+
+    last = first
+    for i in range(len(s) - 1, -1, -1):
+        if _KHMER_CHAR_RE.match(s[i]):
+            last = i
+            break
+
+    core = s[first:last + 1]
+    lead = s[:first]
+    tail = s[last + 1:]
+
+    lead_keep = re.search(r'([០-៩0-9]+\s*[~\.\:\)]?\s*)$', lead)
+    tail_keep = re.match(r'([\u17D4-\u17DA\.\,\!\?]+)', tail)
+
+    out = (
+        (lead_keep.group(1) if lead_keep else '')
+        + core
+        + (tail_keep.group(1) if tail_keep else '')
+    ).strip()
+
+    return _drop_polluted_prefix(out)
+
+
+def _drop_polluted_prefix(s: str) -> str:
+    """
+    Remove note-head junk that OCR printed BEFORE the real lyric text.
+
+    Example produced by a crop that caught the neighbouring staff:
+
+      'មៗ ” 7 ”” “” ”” ”២ៗ” 7 ”” ””“ ” ”“” ” ដល់មនុស្សជាច្រើននៅគ្រប់ជាតិសាសន៍'
+
+    The junk is a run of SHORT tokens (1-3 chars, mostly non-Khmer symbols)
+    followed by the actual lyric.  We find the first token long enough to be
+    real words and keep from there, provided the tail clearly dominates.
+    """
+    tokens = s.split()
+    if len(tokens) < 5:
+        return s
+
+    # Anchor on the first LONG token: real Khmer words run 5+ characters,
+    # whereas note-head junk is always 1-3 characters.
+    start = None
+    for i, t in enumerate(tokens):
+        if len(t) >= 5 and _khmer_char_count(t) >= 4:
+            start = i
+            break
+    if start is None or start == 0:
+        return s
+
+    head_syls = len(_split_khmer_syllables(' '.join(tokens[:start])))
+    tail_syls = len(_split_khmer_syllables(' '.join(tokens[start:])))
+    if tail_syls >= 6 and tail_syls > head_syls * 2:
+        return ' '.join(tokens[start:])
+    return s
+
+
 def _fix_ocr_text(text: str) -> str:
     """
     Post-process raw Tesseract output to fix the most common Khmer OCR errors:
-      1. Unicode normalisation (NFC) — ensures combining marks are properly attached
-      2. Remove Cyrillic/Latin characters that sneak in between Khmer characters
-      3. Strip lines that are pure ASCII/numbers after Khmer-only filtering
-      4. Collapse multiple spaces
+      1. Unicode normalisation (NFC) — combining marks properly attached
+      2. Re-join Khmer clusters that OCR split with spaces (correct spelling)
+      3. Remove Cyrillic/Latin characters that sneak in between Khmer characters
+      4. Strip OCR noise symbols and normalise Khmer punctuation
+      5. Collapse multiple spaces
     """
     import unicodedata
     text = unicodedata.normalize("NFC", text)
+    # Re-attach split clusters: "ស្ ត្រៃ", "ក្រ ែង", "អ ា ន" -> "ស្ត្រៃ", "ក្រែង", "អាន"
+    text = _fix_khmer_spacing(text)
     # Remove stray non-Khmer chars embedded inside Khmer words
     text = _STRIP_NON_KHMER_IN_WORD_RE.sub('', text)
+    # Normalise leftover ASCII punctuation back to Khmer forms
+    text = _normalise_ocr_marks(text)
     # Collapse spaces
     text = re.sub(r' {2,}', ' ', text)
     return text
@@ -1011,6 +1672,123 @@ def _fix_ocr_text(text: str) -> str:
 def _khmer_char_count_in(text: str) -> int:
     """Count total Khmer characters in a multi-line string."""
     return len(_KHMER_CHAR_RE.findall(text))
+
+
+# Characters that never legitimately appear inside Khmer lyrics.
+_JUNK_RE = re.compile(r'[=<>\*\^\|_~`\\/\[\]{}]')
+
+
+def _pick_best_ocr_candidate(candidates: list[str]) -> str:
+    """
+    Choose the most trustworthy OCR candidate.
+
+     1. Normalise each candidate (trim / collapse spaces) and drop junk-heavy
+        ones that clearly failed (e.g. staff-line noise).
+     2. Group identical / near-identical readings and score each group by
+        (how many configs produced it, then its quality score).
+     3. Return the best representative of the winning group.
+
+    Independent agreement is a much stronger accuracy signal than length.
+    """
+    if not candidates:
+        return ""
+
+    cleaned = []
+    for c in candidates:
+        text = " ".join(c.split())
+        if not text:
+            continue
+        # Reject candidates that are mostly junk (staff-line / symbol noise)
+        junk = len(_JUNK_RE.findall(text))
+        if junk and junk / max(len(text), 1) > 0.06:
+            continue
+        cleaned.append(text)
+
+    if not cleaned:
+        return max(candidates, key=_ocr_quality_score)
+
+    # Group by similarity: same length +/- 2 and >= 85 % character match
+    groups: list[list[str]] = []
+    for text in cleaned:
+        placed = False
+        for g in groups:
+            ref = g[0]
+            if abs(len(text) - len(ref)) <= max(2, len(ref) // 12):
+                same = sum(1 for a, b in zip(text, ref) if a == b)
+                if same / max(len(ref), 1) >= 0.85:
+                    g.append(text)
+                    placed = True
+                    break
+        if not placed:
+            groups.append([text])
+
+    # Rank groups: quality FIRST, then agreement, then length.
+    #
+    # Vote count alone is not enough: two configs can agree on "បន្ទល" while a
+    # third correctly reads "បន្ទូល".  The reading with the fewest broken
+    # clusters (dropped vowel signs / coeng) is objectively better.  Agreement
+    # is the tie-breaker, which is what makes a random OCR corruption lose.
+    def group_rank(g: list[str]) -> tuple:
+        best = max(g, key=_ocr_quality_score)
+        return (_ocr_quality_score(best), len(g), len(best))
+
+    groups.sort(key=group_rank, reverse=True)
+    return max(groups[0], key=_ocr_quality_score)
+
+
+def _broken_cluster_count(text: str) -> int:
+    """
+    Count Khmer clusters that are structurally INVALID — the signature of a
+    dropped vowel sign.
+
+    "បន្ទល" is what you get when OCR loses the ូ vowel from "បន្ទូល": the
+    syllable ends in a bare consonant.  "ព្រះ" ends the same way and is fine,
+    so this only counts clusters that are clearly malformed:
+
+      • a coeng (្រ) not followed by a consonant
+      • a dependent vowel sign appearing with NO base consonant before it
+    """
+    broken = 0
+    for i, c in enumerate(text):
+        if c == '\u17D2':
+            if i + 1 >= len(text) or text[i + 1] not in _KHMER_CONSONANTS:
+                broken += 1
+        elif c in _KHMER_VOWELS_OR_SIGNS:
+            j = i - 1
+            while j >= 0 and text[j] in _KHMER_VOWELS_OR_SIGNS:
+                j -= 1
+            if j < 0 or text[j] not in _KHMER_CONSONANTS:
+                if j < 0 or not text[j].isspace():
+                    broken += 1
+    return broken
+
+
+def _ocr_quality_score(text: str) -> float:
+    """
+    Score an OCR candidate by how much REAL, WELL-FORMED Khmer it contains.
+
+      • every Khmer character                        -> +1.0
+      • every valid Khmer syllable                   -> +0.5
+      • every broken cluster (dropped vowel/coeng)   -> -2.5
+      • every structurally impossible cluster        -> -4.0
+      • every ASCII letter/digit mixed in            -> -1.5
+      • every junk symbol (= < > * | _ ~ / ...)      -> -3.0
+
+    The broken/invalid penalties are what make "បន្ទូល" beat "បន្ទល" and
+    "ទាំង" beat "ធទាំង".
+    """
+    khmer = _khmer_char_count_in(text)
+    syllables = _syllable_evidence(text)
+    broken = _broken_cluster_count(text)
+    ascii_alnum = len(re.findall(r'[A-Za-z0-9]', text))
+    junk = len(_JUNK_RE.findall(text))
+    return (
+        khmer * 1.0
+        + syllables * 0.5
+        - broken * 2.5
+        - ascii_alnum * 1.5
+        - junk * 3.0
+    )
 
 
 def _ocr_attempt(processed: 'Image.Image', lang: str, psm: str,
@@ -1027,6 +1805,65 @@ def _ocr_attempt(processed: 'Image.Image', lang: str, psm: str,
         return pytesseract.image_to_string(processed, lang=lang, config=cfg)
     except Exception:
         return ""
+
+
+@lru_cache(maxsize=1)
+def _script_khmer_model() -> tuple[str, str] | None:
+    """Return (script_lang, tessdata_dir) if the script/Khmer model exists."""
+    tess_prefix = os.path.dirname(os.path.dirname(_get_tesseract()))  # e.g. /opt/homebrew
+    script_dir  = os.path.join(tess_prefix, "share", "tessdata")
+    if os.path.exists(os.path.join(script_dir, "script", "Khmer.traineddata")):
+        return "script/Khmer", script_dir
+    return None
+
+
+def _ocr_candidates(processed: 'Image.Image') -> list[str]:
+    """
+    Run every OCR strategy CONCURRENTLY and return the non-empty results.
+
+    Tesseract releases the GIL inside its C extension, so running the four
+    attempts in a thread pool is ~3-4x faster than the previous sequential
+    loop, and the winning candidate is exactly the same.
+
+      A. khm,            psm 7   (single line)
+      B. khm,            psm 6   (uniform block)
+      C. script/Khmer,   psm 6   (script-level model)
+      D. khm+eng,        psm 6   (chord-row guard)
+    """
+    # Always run BOTH page-segmentation modes.  They do not agree, and the one
+    # that reads a dropped vowel sign correctly differs per line (psm 7 gets
+    # "បន្ទូល" where psm 6 gets "បន្ទល").  Running both in parallel costs no
+    # wall-clock time and lets the quality scorer pick the complete reading.
+    strategies: list[tuple[str, str, str | None]] = [
+        ("khm", "7", None),
+        ("khm", "6", None),
+    ]
+    script = _script_khmer_model()
+    if script:
+        strategies.append((script[0], "6", script[1]))
+    strategies.append(("khm+eng", "6", None))
+
+    # De-duplicate identical lang/psm pairs
+    seen: set[tuple[str, str]] = set()
+    uniq: list[tuple[str, str, str | None]] = []
+    for lang, psm, tdir in strategies:
+        key = (lang, psm)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((lang, psm, tdir))
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(uniq)) as pool:
+        results = list(pool.map(
+            lambda args: _ocr_attempt(processed, args[0], args[1], args[2]), uniq
+        ))
+    return [r for r in results if r]
+
+
+# Below this quality score a strip is considered a failed OCR read and is
+# retried at other scales.
+_GOOD_ENOUGH = 25.0
 
 
 def _ocr_strip(img: Image.Image) -> str:
@@ -1050,49 +1887,97 @@ def _ocr_strip(img: Image.Image) -> str:
         return ""
 
     pytesseract.pytesseract.tesseract_cmd = _get_tesseract()
-    processed = _preprocess_for_ocr(img)
-    _, ph = processed.size
-    psm_primary = "7" if ph < 100 else "6"
 
-    # Build script/Khmer tessdata path if available
-    tess_prefix = os.path.dirname(os.path.dirname(_get_tesseract()))  # e.g. /opt/homebrew
-    script_dir  = os.path.join(tess_prefix, "share", "tessdata")
-    script_lang = "script/Khmer" if os.path.exists(
-        os.path.join(script_dir, "script", "Khmer.traineddata")
-    ) else None
+    def _run(candidate_img: 'Image.Image') -> list[str]:
+        cands = _ocr_candidates(candidate_img)
+        if not cands:
+            return []
+        chosen = _pick_best_ocr_candidate(cands)
+        return [
+            _fix_verse_marker(_trim_edge_junk(_fix_ocr_text(ln.strip())))
+            for ln in chosen.splitlines()
+            if ln.strip() and _line_is_khmer(ln)
+        ]
 
-    candidates: list[str] = []
+    # ── Multi-scale OCR with agreement voting ────
+    #
+    # Tesseract's Khmer model is sensitive to glyph size: the same line reads
+    # correctly at one scale and gains a stray letter at another ("ទាំង" vs
+    # "ធទាំង").  Which scale wins differs per strip, so no single default is
+    # right.
+    #
+    # The reliable signal is AGREEMENT: a stray character introduced by a bad
+    # scale appears in that scale only, while a genuine reading is reproduced
+    # independently by the other scales.  So each scale votes, and the reading
+    # with the most votes wins — the same principle used for the Tesseract
+    # configs, applied across render scales.
+    from concurrent.futures import ThreadPoolExecutor
 
-    # Strategy A/B: khm with both psm modes
-    for psm in (psm_primary, "6" if psm_primary == "7" else "7"):
-        raw = _ocr_attempt(processed, "khm", psm)
-        if raw:
-            candidates.append(raw)
+    # Scores are compared, not counted, so the scales only need to be
+    # genuinely different sizes.  1200 was measured to be consistently worse
+    # and outvoted better readings, so it is not used.
+    scales = (1700, 2400)
 
-    # Strategy C: script/Khmer model (often better at individual glyph shapes)
-    if script_lang:
-        raw = _ocr_attempt(processed, script_lang, "6", tessdata_dir=script_dir)
-        if raw:
-            candidates.append(raw)
+    def _try_scale(target_w: int) -> tuple[tuple[int, int], list[str]]:
+        try:
+            pre = _preprocess_for_ocr(img, target_width=target_w)
+            return pre.size, _run(pre)
+        except Exception:
+            return (0, 0), []
 
-    # Strategy D: khm+eng fallback
-    raw = _ocr_attempt(processed, "khm+eng", "6")
-    if raw:
-        candidates.append(raw)
+    with ThreadPoolExecutor(max_workers=len(scales)) as pool:
+        results = list(pool.map(_try_scale, scales))
 
-    if not candidates:
+    # If two scales produced identical images their readings are the same
+    # opinion and must not be counted twice.
+    seen_sizes: set[tuple[int, int]] = set()
+    readings: list[list[str]] = []
+    for size, lines in results:
+        if not lines or size in seen_sizes:
+            continue
+        seen_sizes.add(size)
+        readings.append(lines)
+    if not readings:
         return ""
+    if len(readings) == 1:
+        return "\n".join(readings[0])
 
-    # Pick the candidate with the most Khmer characters
-    best = max(candidates, key=_khmer_char_count_in)
+    # Group near-identical readings (same line count, >= 90 % char match).
+    def _join(r: list[str]) -> str:
+        return "\n".join(r)
 
-    # Post-process: keep Khmer-containing lines, fix encoding, normalise
-    lines = [
-        _fix_ocr_text(ln.strip())
-        for ln in best.splitlines()
-        if ln.strip() and _line_is_khmer(ln)
-    ]
-    return "\n".join(lines)
+    def _similar(a: list[str], b: list[str]) -> bool:
+        if len(a) != len(b):
+            return False
+        for la, lb in zip(a, b):
+            if abs(len(la) - len(lb)) > max(2, len(la) // 10):
+                return False
+            same = sum(1 for x, y in zip(la, lb) if x == y)
+            if same / max(len(la), 1) < 0.90:
+                return False
+        return True
+
+    groups: list[list[list[str]]] = []
+    for r in readings:
+        for g in groups:
+            if _similar(g[0], r):
+                g.append(r)
+                break
+        else:
+            groups.append([r])
+
+    # Quality first (fewest broken clusters, best density), then agreement.
+    #
+    # Agreement alone is not enough: several scales can agree on a corrupted
+    # reading while one scale is correct.  The quality score is what separates
+    # "ទាំង" from "ធទាំង"; agreement only breaks near-ties.
+    def _rank(g: list[list[str]]) -> tuple:
+        best = max(g, key=lambda r: _ocr_quality_score(_join(r)))
+        return (_ocr_quality_score(_join(best)), len(g))
+
+    groups.sort(key=_rank, reverse=True)
+    winner = max(groups[0], key=lambda r: _ocr_quality_score(_join(r)))
+    return _join(winner)
 
 
 def _ocr_full_page_khmer(page_rgb: Image.Image) -> str:
@@ -1114,22 +1999,26 @@ def _ocr_full_page_khmer(page_rgb: Image.Image) -> str:
         os.path.join(script_dir, "script", "Khmer.traineddata")
     ) else None
 
-    candidates: list[str] = []
-    for lang in ("khm", "khm+eng"):
-        raw = _ocr_attempt(processed, lang, "3")
-        if raw:
-            candidates.append(raw)
+    from concurrent.futures import ThreadPoolExecutor
+    strategies: list[tuple[str, str, str | None]] = [
+        ("khm", "3", None),
+        ("khm+eng", "3", None),
+    ]
     if script_lang:
-        raw = _ocr_attempt(processed, script_lang, "3", tessdata_dir=script_dir)
-        if raw:
-            candidates.append(raw)
+        strategies.append((script_lang, "3", script_dir))
+
+    with ThreadPoolExecutor(max_workers=len(strategies)) as pool:
+        results = list(pool.map(
+            lambda a: _ocr_attempt(processed, a[0], a[1], a[2]), strategies
+        ))
+    candidates = [r for r in results if r]
 
     if not candidates:
         return ""
 
-    best = max(candidates, key=_khmer_char_count_in)
+    best = _pick_best_ocr_candidate(candidates)
     lines = [
-        _fix_ocr_text(ln.strip())
+        _fix_verse_marker(_fix_ocr_text(ln.strip()))
         for ln in best.splitlines()
         if ln.strip() and _line_is_khmer(ln)
     ]
@@ -1138,59 +2027,116 @@ def _ocr_full_page_khmer(page_rgb: Image.Image) -> str:
 
 # ── Main extraction entry point ─────────────────────────────────
 
-def extract_lyrics_from_bytes(data: bytes, ext: str) -> str:
+def _encode_png(img: Image.Image) -> str:
+    """Encode a PIL image as a base64 PNG data URL."""
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _encode_thumb(img: Image.Image, max_w: int = 1100) -> str:
+    """Encode a page image as a reasonably-sized base64 JPEG for display."""
+    page = img.copy()
+    if page.width > max_w:
+        h = int(page.height * (max_w / page.width))
+        page = page.resize((max_w, max(h, 1)), Image.LANCZOS)
+    buf = io.BytesIO()
+    page.convert("RGB").save(buf, format="JPEG", quality=82, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _analyze_page(page_rgb: Image.Image) -> dict:
+    """
+    OCR only the Khmer lyric rows that sit UNDER the melody notation.
+
+    The song-title block at the top (title / Korean subtitle / hymn number) is
+    deliberately NOT OCR'd. It is returned as an image crop so it can be placed
+    on the first slide instead of polluting the lyric text box.
+    """
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+
+    info = _classify_strips(page_rgb)
+    strips = info["lyrics"]
+
+    if strips:
+        # OCR every lyric strip of this page concurrently, keep paper order
+        with _TPE(max_workers=min(8, len(strips))) as pool:
+            texts = list(pool.map(_ocr_strip, strips))
+        lines: list[str] = []
+        for text in texts:
+            lines.extend(ln for ln in text.splitlines() if ln.strip())
+    else:
+        # Fallback: full-page OCR filtered to Khmer only
+        text = _ocr_full_page_khmer(page_rgb)
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+
+    return {
+        "lines": lines,
+        "title": info.get("title"),
+        "has_music": info.get("has_music", False),
+    }
+
+
+def extract_lyrics_from_bytes(data: bytes, ext: str) -> dict:
     """
     Accept raw file bytes + extension (.pdf / .png / .jpg / .jpeg).
-    Returns ONLY the Khmer lyric lines, with blank lines as verse separators.
+
+    Returns a dict:
+      text        - ONLY the Khmer lyric lines found under the melody
+      pages       - base64 JPEG previews of every page (so the UI can show
+                    the uploaded PDF content)
+      title_image - base64 PNG of the detected song-title block (first slide)
+      page_count  - number of pages
+      has_music   - whether melody notation was found on any page
 
     Pipeline per page:
-      1. Convert PDF → RGB at 300 dpi (larger = better OCR)
-      2. Detect & isolate lyric strips by discarding staff/notation rows
-      3. OCR each lyric strip with lang=khm, keep only Khmer lines
-      4. If strip isolation yields nothing, OCR full page and filter to Khmer
-      5. Run filter_lyrics() as a final pass to ensure no garbage remains
+      1. Convert PDF -> RGB at 150 dpi (accuracy sweet spot for Khmer)
+      2. Classify strips: title block / notation rows / lyric rows
+      3. OCR ONLY the lyric rows under the melody (title block excluded)
+      4. Run filter_lyrics() as a final pass to remove any remaining junk
     """
-    all_lines: list[str] = []
+    from concurrent.futures import ThreadPoolExecutor
 
-    def process_page(page_rgb: Image.Image) -> None:
-        strips = _extract_lyric_strips(page_rgb)
-
-        if strips:
-            for strip_img in strips:
-                text = _ocr_strip(strip_img)
-                lines = [ln for ln in text.splitlines() if ln.strip()]
-                if lines:
-                    all_lines.extend(lines)
-                    all_lines.append("")   # verse separator after each strip
-        else:
-            # Fallback: full-page OCR filtered to Khmer only
-            text = _ocr_full_page_khmer(page_rgb)
-            lines = [ln for ln in text.splitlines() if ln.strip()]
-            all_lines.extend(lines)
+    empty = {"pages": [], "title_image": "", "page_count": 0, "has_music": False}
 
     if ext == ".pdf":
         try:
             from pdf2image import convert_from_bytes
-            pages = convert_from_bytes(data, dpi=300)
+            # 150 dpi is the accuracy sweet spot for Khmer: high enough to
+            # resolve vowel signs, low enough that Tesseract's LSTM engine does
+            # not choke on an oversized page (300 dpi produced garbage).
+            pages = convert_from_bytes(data, dpi=150)
         except Exception as e:
-            return f"[PDF conversion error: {e}]"
-        for page in pages:
-            process_page(page.convert("RGB"))
-            all_lines.append("")   # separator between PDF pages
+            return {"text": f"[PDF conversion error: {e}]", **empty}
+        page_images = [p.convert("RGB") for p in pages]
     else:
         try:
-            img = Image.open(io.BytesIO(data)).convert("RGB")
-            process_page(img)
+            page_images = [Image.open(io.BytesIO(data)).convert("RGB")]
         except Exception as e:
-            return f"[Image error: {e}]"
+            return {"text": f"[Image error: {e}]", **empty}
 
-    if not all_lines or all(not ln for ln in all_lines):
-        return "(no Khmer text detected)"
+    # Pages are independent -> process in parallel, preserve original order
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(page_images)))) as pool:
+        parsed = list(pool.map(_analyze_page, page_images))
 
-    # Final filter: keep only Khmer lines, preserve blank separators
-    raw      = "\n".join(all_lines)
-    filtered = filter_lyrics(raw)
-    return filtered.strip() if filtered.strip() else "(no Khmer text detected)"
+    all_lines: list[str] = []
+    for p in parsed:
+        all_lines.extend(p["lines"])
+        all_lines.append("")   # separator between pages
+
+    title_crop = next((p["title"] for p in parsed if p.get("title")), None)
+
+    filtered = filter_lyrics("\n".join(all_lines)).strip()
+    if not filtered:
+        filtered = "(no Khmer text detected)"
+
+    return {
+        "text": filtered,
+        "pages": [_encode_thumb(img) for img in page_images],
+        "title_image": _encode_png(title_crop) if title_crop is not None else "",
+        "page_count": len(page_images),
+        "has_music": any(p.get("has_music") for p in parsed),
+    }
 
 
 # ── Song-slide PPTX builder ──────────────────────────────────────
@@ -1206,7 +2152,7 @@ class SongSettings(BaseModel):
     text_color:     str   = "#000000"
     ref_color:      str   = "#555555"
     ref_font_size:  int   = Field(22, ge=8, le=72)
-    verse_num_color: str  = "#ffcc44"
+    verse_num_color: str  = "#ef4444"
     chorus_r_color:  str  = "#ef4444"
     padding:        float = Field(0.45, ge=0.05, le=2.0)
     lines_per_slide: int  = Field(2, ge=1, le=10)
@@ -1345,7 +2291,8 @@ def _build_song_pptx(lyrics_text: str, s: SongSettings, song_title: str = "") ->
     ref_rgb  = _hex_to_rgb(s.ref_color)
     bg_rgb   = _hex_to_rgb(s.bg_color)
     red_rgb  = (239, 68, 68)  # Red for chorus 'R.'
-    vnum_rgb = _hex_to_rgb(getattr(s, 'verse_num_color', '#ffcc44'))
+    # Verse numbers default to red, matching the chorus 'R.' marker
+    vnum_rgb = _hex_to_rgb(getattr(s, 'verse_num_color', '#ef4444'))
 
     pad = Inches(s.padding)
     sw  = prs.slide_width
@@ -1354,6 +2301,8 @@ def _build_song_pptx(lyrics_text: str, s: SongSettings, song_title: str = "") ->
     slides_data = parse_song_lyrics(lyrics_text)
     if not slides_data:
         slides_data = [{'is_title': False, 'prefix': '', 'prefix_color': '', 'lines': ['(no lyrics found)']}]
+    # NOTE: one parsed verse/chorus == one slide.  Text is NOT split across
+    # continuation slides — a verse always stays together on a single page.
 
     if not song_title and slides_data and slides_data[0].get('is_title'):
         song_title = slides_data[0].get('title', '')
@@ -1542,6 +2491,7 @@ def _build_song_preview_slides(lyrics_text: str, s: SongSettings, song_title: st
     slides = parse_song_lyrics(lyrics_text)
     if not slides:
         return [{"is_title": False, "prefix": "", "prefix_color": "", "lines": ["(no lyrics)"], "title": song_title}]
+    # One verse/chorus == one slide (no continuation splitting).
 
     # In preview, attach title/reference to slides
     first_title = slides[0].get("title", "") if (slides and slides[0].get("is_title")) else song_title
@@ -1554,13 +2504,31 @@ def _build_song_preview_slides(lyrics_text: str, s: SongSettings, song_title: st
 # ── Song OCR endpoint ────────────────────────────────────────────
 @app.post("/api/song/extract")
 async def song_extract(file: UploadFile = File(...)):
-    """Accept a PDF/JPG/PNG upload, run OCR, return extracted lyrics as JSON."""
+    """
+    Accept a PDF / image / text upload and return extracted lyrics as JSON.
+
+    Response: { text, pages[], title_image, page_count, has_music }
+      • text         — Khmer lyrics found UNDER the melody (title block excluded)
+      • pages        — base64 page previews so the UI can display the PDF
+      • title_image  — base64 crop of the song-title block for the first slide
+    """
     ext = Path(file.filename or "").suffix.lower()
-    if ext not in (".pdf", ".png", ".jpg", ".jpeg"):
-        return {"error": "Only PDF, PNG, JPG files are supported."}, 400
+    if ext not in (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".txt"):
+        return {"error": "Only PDF, PNG, JPG, WEBP and TXT files are supported."}, 400
+
     data = await file.read()
-    text = extract_lyrics_from_bytes(data, ext)
-    return {"text": text}
+
+    # Plain text: no OCR, no page image
+    if ext == ".txt":
+        try:
+            return {
+                "text": data.decode("utf-8", errors="replace"),
+                "pages": [], "title_image": "", "page_count": 0, "has_music": False,
+            }
+        except Exception as e:
+            return {"error": f"Could not read text file: {e}"}, 400
+
+    return extract_lyrics_from_bytes(data, ext)
 
 
 @app.post("/api/song/preview")
@@ -1579,6 +2547,303 @@ def song_generate(req: SongGenerateRequest):
         io.BytesIO(pptx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Slide Editor — bulk-restyle EVERY slide of an uploaded PPTX
+#  (background, font, size, colour, outline, alignment, spacing …)
+# ═══════════════════════════════════════════════════════════════════
+
+class SlideRestyleSettings(BaseModel):
+    """Formatting applied to every slide in the deck.  All fields optional:
+    a field left as ``None`` is NOT changed."""
+    # Background
+    bg_color:      Optional[str]   = None
+    bg_image:      Optional[str]   = None   # data URL, applied to every slide
+    # Text
+    font_family:   Optional[str]   = None
+    font_size:     Optional[int]   = Field(None, ge=6, le=200)
+    text_color:    Optional[str]   = None
+    bold:          Optional[bool]  = None
+    italic:        Optional[bool]  = None
+    underline:     Optional[bool]  = None
+    align:         Optional[str]   = None   # left | center | right | justify
+    line_spacing:  Optional[float] = Field(None, ge=0.5, le=4.0)
+    # Text outline (PowerPoint "text outline")
+    outline_color: Optional[str]   = None
+    outline_width: Optional[float] = Field(None, ge=0.0, le=20.0)   # points
+    # Text shadow
+    shadow:        Optional[bool]  = None
+    # Scaling of the whole text box content
+    scale_font_by_pct: Optional[float] = Field(None, ge=25, le=400)
+    # Vertical anchoring of text inside its box: top | middle | bottom
+    vertical_anchor: Optional[str]   = None
+
+
+class SlideRestyleRequest(BaseModel):
+    settings: SlideRestyleSettings = SlideRestyleSettings()
+    # Restrict changes to selected slide indices (1-based). Empty = all.
+    slides: list[int] = []
+
+
+# ── Low-level run / paragraph formatting helpers ──────────────────
+
+def _iter_slide_runs(prs):
+    """Yield (slide, shape, paragraph, run) for every text run in the deck."""
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            for para in shape.text_frame.paragraphs:
+                for run in para.runs:
+                    yield slide, shape, para, run
+
+
+def _set_run_outline(run, color_hex: str, width_pt: float) -> None:
+    """
+    Apply a PowerPoint text OUTLINE (not a shape outline) to a run.
+
+    python-pptx has no API for this, so the <a:ln> element is written
+    directly on the run properties, followed by a solid fill.
+    """
+    rPr = run._r.get_or_add_rPr()
+    for el in rPr.findall(qn("a:ln")):
+        rPr.remove(el)
+
+    ln = etree.SubElement(rPr, qn("a:ln"))
+    ln.set("w", str(int(max(width_pt, 0.25) * 12700)))   # points -> EMU
+    fill = etree.SubElement(ln, qn("a:solidFill"))
+    clr = etree.SubElement(fill, qn("a:srgbClr"))
+    clr.set("val", color_hex.lstrip("#").upper()[:6])
+    # Round joins look far better on Khmer glyphs than mitered corners
+    etree.SubElement(ln, qn("a:round"))
+
+    # <a:ln> must sit before the fill elements in rPr — python-pptx appends in
+    # schema order for solidFill, so re-insert ln at the correct position.
+    rPr.remove(ln)
+    insert_at = 0
+    for i, child in enumerate(list(rPr)):
+        tag = etree.QName(child).localname
+        if tag in ("ln", "noFill", "solidFill", "gradFill", "blipFill",
+                   "pattFill", "grpFill", "effectLst", "effectDag",
+                   "highlight", "uLnTx", "uLn", "uFillTx", "uFill"):
+            break
+        insert_at = i + 1
+    rPr.insert(insert_at, ln)
+
+
+def _set_run_shadow(run) -> None:
+    """Add a subtle drop shadow to a run's <a:effectLst>."""
+    rPr = run._r.get_or_add_rPr()
+    for el in rPr.findall(qn("a:effectLst")):
+        rPr.remove(el)
+    eff = etree.SubElement(rPr, qn("a:effectLst"))
+    shdw = etree.SubElement(eff, qn("a:outerShdw"))
+    shdw.set("blurRad", "38100")
+    shdw.set("dist", "25400")
+    shdw.set("dir", "2700000")
+    shdw.set("algn", "tl")
+    shdw.set("rotWithShape", "0")
+    clr = etree.SubElement(shdw, qn("a:srgbClr"))
+    clr.set("val", "000000")
+    alpha = etree.SubElement(clr, qn("a:alpha"))
+    alpha.set("val", "45000")
+
+
+def _apply_slide_background(slide, color_hex: str | None) -> None:
+    """Solid-fill the slide background."""
+    if not color_hex:
+        return
+    fill = slide.background.fill
+    fill.solid()
+    fill.fore_color.rgb = RGBColor(*_hex_to_rgb(color_hex))
+
+
+def _add_background_image(prs, slide, image_bytes: bytes) -> None:
+    """Place an image covering the entire slide, behind existing content."""
+    from pptx.util import Emu
+    pic = slide.shapes.add_picture(
+        io.BytesIO(image_bytes), 0, 0,
+        width=Emu(prs.slide_width), height=Emu(prs.slide_height),
+    )
+    # Move the picture to the very back of the z-order: right after the
+    # mandatory nvGrpSpPr / grpSpPr elements, whatever their position.
+    sp_tree = slide.shapes._spTree
+    sp_tree.remove(pic._element)
+    insert_at = 0
+    for i, child in enumerate(list(sp_tree)):
+        tag = etree.QName(child).localname
+        if tag in ("nvGrpSpPr", "grpSpPr"):
+            insert_at = i + 1
+    sp_tree.insert(insert_at, pic._element)
+
+
+def restyle_pptx(data: bytes, s: SlideRestyleSettings, only_slides: list[int] | None = None) -> bytes:
+    """Apply bulk formatting to an existing PPTX and return the new bytes."""
+    prs = Presentation(io.BytesIO(data))
+
+    # Decode the optional background image once
+    bg_img_bytes = None
+    if s.bg_image:
+        try:
+            payload = s.bg_image.split(",", 1)[1] if "," in s.bg_image else s.bg_image
+            bg_img_bytes = base64.b64decode(payload)
+        except Exception:
+            bg_img_bytes = None
+
+    targets = set(only_slides or [])
+
+    for idx, slide in enumerate(prs.slides, start=1):
+        if targets and idx not in targets:
+            continue
+
+        # ── Background ──────────────────────────────────────────────
+        if bg_img_bytes:
+            _add_background_image(prs, slide, bg_img_bytes)
+        elif s.bg_color:
+            _apply_slide_background(slide, s.bg_color)
+
+        # ── Text formatting ─────────────────────────────────────────
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            if s.vertical_anchor:
+                from pptx.enum.text import MSO_VERTICAL_ANCHOR
+                anchor_map = {
+                    "top": MSO_VERTICAL_ANCHOR.TOP,
+                    "middle": MSO_VERTICAL_ANCHOR.MIDDLE,
+                    "bottom": MSO_VERTICAL_ANCHOR.BOTTOM,
+                }
+                a = anchor_map.get(s.vertical_anchor.lower())
+                if a is not None:
+                    shape.text_frame.vertical_anchor = a
+                    # PowerPoint honours anchorCtr for true horizontal centring
+                    shape.text_frame.word_wrap = True
+
+            for para in shape.text_frame.paragraphs:
+                if s.align:
+                    para.alignment = ALIGN_MAP.get(s.align)
+                if s.line_spacing is not None:
+                    _set_line_spacing(para, s.line_spacing)
+
+                for run in para.runs:
+                    if not run.text.strip():
+                        continue
+                    if s.font_family:
+                        run.font.name = s.font_family
+                        _fix_font(run, s.font_family)
+                    if s.font_size is not None:
+                        run.font.size = Pt(s.font_size)
+                    elif s.scale_font_by_pct:
+                        base = run.font.size
+                        if base is not None:
+                            run.font.size = Pt(
+                                max(6, int(base.pt * s.scale_font_by_pct / 100))
+                            )
+                    if s.font_size is not None and s.scale_font_by_pct:
+                        run.font.size = Pt(max(6, int(s.font_size * s.scale_font_by_pct / 100)))
+                    if s.text_color:
+                        run.font.color.rgb = RGBColor(*_hex_to_rgb(s.text_color))
+                    if s.bold is not None:
+                        run.font.bold = s.bold
+                    if s.italic is not None:
+                        run.font.italic = s.italic
+                    if s.underline is not None:
+                        run.font.underline = s.underline
+                    if s.outline_color and (s.outline_width or 0) > 0:
+                        _set_run_outline(run, s.outline_color, s.outline_width)
+                    if s.shadow:
+                        _set_run_shadow(run)
+
+    out = io.BytesIO()
+    prs.save(out)
+    out.seek(0)
+    return out.read()
+
+
+def inspect_pptx(data: bytes) -> dict:
+    """Summarise the slides so the editor UI can show thumbnails + counts."""
+    prs = Presentation(io.BytesIO(data))
+    slides_info = []
+    for i, slide in enumerate(prs.slides, start=1):
+        text_shapes = 0
+        pictures = 0
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip():
+                text_shapes += 1
+            if shape.shape_type == 13:   # PICTURE
+                pictures += 1
+        slides_info.append({
+            "index": i,
+            "text_shapes": text_shapes,
+            "pictures": pictures,
+        })
+    return {
+        "slide_count": len(slides_info),
+        "slides": slides_info,
+        "width": prs.slide_width,
+        "height": prs.slide_height,
+        "aspect": round(prs.slide_width / prs.slide_height, 4) if prs.slide_height else 1.7778,
+    }
+
+
+@app.post("/api/slides/inspect")
+async def slides_inspect(file: UploadFile = File(...)):
+    """Return slide count + per-slide summary + rendered thumbnails."""
+    if Path(file.filename or "").suffix.lower() != ".pptx":
+        raise HTTPException(status_code=400, detail="Only .pptx files are supported.")
+    data = await file.read()
+    try:
+        info = inspect_pptx(data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read PPTX: {e}")
+    info["thumbnails"] = _render_slides_pillow_fallback(data, width_px=900)
+    info["filename"] = file.filename
+    return info
+
+
+@app.post("/api/slides/apply")
+async def slides_apply(
+    file: UploadFile = File(...),
+    settings: str = Form("{}"),
+    slides: str = Form("[]"),
+    preview: str = Form("false"),
+):
+    """
+    Apply bulk formatting to every (or selected) slide and return the PPTX.
+
+    When ``preview=true`` the result is NOT downloaded; it is returned as
+    base64 thumbnails so the UI can show the change before saving.
+    """
+    import json as _json
+
+    if Path(file.filename or "").suffix.lower() != ".pptx":
+        raise HTTPException(status_code=400, detail="Only .pptx files are supported.")
+
+    data = await file.read()
+    try:
+        s = SlideRestyleSettings(**_json.loads(settings or "{}"))
+        only = _json.loads(slides or "[]")
+        only = [int(x) for x in only] if only else []
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Bad settings: {e}")
+
+    try:
+        new_bytes = restyle_pptx(data, s, only)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Restyle failed: {e}")
+
+    if preview.lower() in ("true", "1", "yes"):
+        return {
+            "slide_count": len(Presentation(io.BytesIO(new_bytes)).slides),
+            "thumbnails": _render_slides_pillow_fallback(new_bytes, width_px=900),
+        }
+
+    return StreamingResponse(
+        io.BytesIO(new_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": "attachment; filename=\"edited_slides.pptx\""},
     )
 
 
@@ -2010,12 +3275,43 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
     def _safe_rgb(fill) -> tuple | None:
         """Return (r,g,b) from a fill object, or None if unavailable."""
         try:
-            from pptx.enum.dml import MSO_FILL
             # BACKGROUND(5) and NONE have no fore_color
             if fill.type is None or fill.type.name in ("BACKGROUND", "NONE"):
                 return None
             c = fill.fore_color.rgb
             return (c.red, c.green, c.blue)
+        except Exception:
+            return None
+
+    def _slide_bg_rgb(slide) -> tuple | None:
+        """
+        Read the slide's explicit background colour from the XML.
+
+        slide.background.fill is unreliable: for an explicitly-set <p:bg> the
+        fill type can still report BACKGROUND, so the renderer would fall back
+        to white and the thumbnail would not match the real deck.  Reading
+        srgbClr directly from <p:bg><p:bgPr><a:solidFill> is exact.
+        """
+        try:
+            csld = slide._element.find(qn("p:cSld"))
+            if csld is None:
+                return None
+            bg = csld.find(qn("p:bg"))
+            if bg is None:
+                return None
+            bg_pr = bg.find(qn("p:bgPr"))
+            if bg_pr is None:
+                return None
+            solid = bg_pr.find(qn("a:solidFill"))
+            if solid is None:
+                return None
+            clr = solid.find(qn("a:srgbClr"))
+            if clr is None:
+                return None
+            val = (clr.get("val") or "").strip()
+            if len(val) != 6:
+                return None
+            return tuple(int(val[i:i + 2], 16) for i in (0, 2, 4))
         except Exception:
             return None
 
@@ -2039,7 +3335,7 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
         # ── Background ──────────────────────────────────────────
         bg_rgb = (255, 255, 255)  # default white (most slides are white)
         try:
-            bg_color = _safe_rgb(slide.background.fill)
+            bg_color = _slide_bg_rgb(slide) or _safe_rgb(slide.background.fill)
             if bg_color is not None:
                 bg_rgb = bg_color
         except Exception:
@@ -2108,20 +3404,59 @@ def _render_slides_pillow_fallback(pptx_bytes: bytes, width_px: int = 960) -> li
                 return 24.0  # sensible default
 
             def _run_color(run, para_default=(0, 0, 0)) -> tuple:
+                # 1) normal API path (an explicit srgbClr)
                 try:
                     c = run.font.color.rgb
-                    return (c.red, c.green, c.blue)
+                    if c is not None:
+                        return (c.red, c.green, c.blue)
                 except Exception:
                     pass
-                # fall back to theme colour luminance
+                # 2) read srgbClr straight from the run's XML.  Needed because
+                # font.color.rgb raises for some explicit solid fills, which
+                # would silently render the text black.
                 try:
-                    from pptx.dml.color import _Colormap
-                    pass
+                    rPr = run._r.find(qn("a:rPr"))
+                    if rPr is not None:
+                        solid = rPr.find(qn("a:solidFill"))
+                        if solid is not None:
+                            clr = solid.find(qn("a:srgbClr"))
+                            if clr is not None:
+                                val = (clr.get("val") or "").strip()
+                                if len(val) == 6:
+                                    return tuple(int(val[i:i + 2], 16) for i in (0, 2, 4))
                 except Exception:
                     pass
                 return para_default
 
+            # Vertical anchoring: PowerPoint centres text inside the box when
+            # anchor is MIDDLE.  Without this the thumbnail always draws from
+            # the top of the shape, which looks nothing like the real slide.
+            anchor = None
+            try:
+                a = tf.vertical_anchor
+                anchor = a.name if a is not None else None
+            except Exception:
+                anchor = None
+
+            total_h = 0
+            if anchor == "MIDDLE":
+                for para in tf.paragraphs:
+                    runs_p = [r for r in para.runs if r.text]
+                    if not runs_p:
+                        total_h += fpt(_para_font_pt(para) * 1.2)
+                        continue
+                    try:
+                        pt = runs_p[0].font.size.pt if runs_p[0].font.size else _para_font_pt(para)
+                    except Exception:
+                        pt = _para_font_pt(para)
+                    total_h += int(fpt(pt) * 1.35)
+
             line_y = sy
+            if anchor == "MIDDLE" and total_h < sh:
+                line_y = sy + (sh - total_h) // 2
+            elif anchor == "BOTTOM":
+                line_y = sy + max(0, sh - total_h)
+
             for para in tf.paragraphs:
                 # Collect runs (preserve spaces between runs)
                 runs = [(r.text, r) for r in para.runs if r.text]

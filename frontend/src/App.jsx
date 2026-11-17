@@ -17,6 +17,8 @@ import {
   FileMusic,
   ExternalLink,
   Calculator,
+  ScanText,
+  SlidersHorizontal,
 } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import PreviewPanel from "./components/PreviewPanel.jsx";
@@ -25,6 +27,8 @@ import SongSlidePage from "./SongSlidePage.jsx";
 import MergeSlidesPage from "./MergeSlidesPage.jsx";
 import MelodySlidePage from "./MelodySlidePage.jsx";
 import MathematicPage from "./MathematicPage.jsx";
+import SongExtractPage from "./SongExtractPage.jsx";
+import SlideEditorPage from "./SlideEditorPage.jsx";
 import { fetchPreview, generatePptx } from "./api.js";
 import { DEFAULT_SETTINGS } from "./constants.js";
 
@@ -77,7 +81,7 @@ Romans 8:28
 And we know that in all things God works for the good of those who love him.`;
 
 export default function App() {
-  const [page, setPage] = useState("bible"); // 'bible' | 'melody' | 'song' | 'merge'
+  const [page, setPage] = useState("bible"); // 'bible' | 'melody' | 'song' | 'extract' | 'merge' | 'math'
   const [rawText, setRawText] = useState("");
   const [reference, setReference] = useState("");
   const [perSlide, setPerSlide] = useState(1);
@@ -285,6 +289,40 @@ export default function App() {
 
           <button
             onClick={() => {
+              setPage("extract");
+              setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
+              ${
+                page === "extract"
+                  ? "bg-brand-50 text-brand-600 border border-brand-200"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+          >
+            <ScanText size={18} />
+            <span>Song File Extract</span>
+            {page === "extract" && <ChevronRight size={16} className="ml-auto" />}
+          </button>
+
+          <button
+            onClick={() => {
+              setPage("editor");
+              setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
+              ${
+                page === "editor"
+                  ? "bg-brand-50 text-brand-600 border border-brand-200"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+          >
+            <SlidersHorizontal size={18} />
+            <span>Slide Editor</span>
+            {page === "editor" && <ChevronRight size={16} className="ml-auto" />}
+          </button>
+
+          <button
+            onClick={() => {
               setPage("merge");
               setSidebarOpen(false);
             }}
@@ -346,6 +384,10 @@ export default function App() {
                   <FileMusic size={16} className="text-white" />
                 ) : page === "song" ? (
                   <Music size={16} className="text-white" />
+                ) : page === "extract" ? (
+                  <ScanText size={16} className="text-white" />
+                ) : page === "editor" ? (
+                  <SlidersHorizontal size={16} className="text-white" />
                 ) : page === "math" ? (
                   <Calculator size={16} className="text-white" />
                 ) : (
@@ -359,9 +401,13 @@ export default function App() {
                     ? "Melody Slide"
                     : page === "song"
                       ? "Song Slides"
-                      : page === "math"
-                        ? "Mathematic"
-                        : "Merge Slides"}
+                      : page === "extract"
+                        ? "Song File Extract"
+                        : page === "editor"
+                          ? "Slide Editor"
+                          : page === "math"
+                            ? "Mathematic"
+                            : "Merge Slides"}
               </h1>
             </div>
             {page === "bible" && detected && (
@@ -412,6 +458,10 @@ export default function App() {
           <MelodySlidePage />
         ) : page === "song" ? (
           <SongSlidePage />
+        ) : page === "extract" ? (
+          <SongExtractPage />
+        ) : page === "editor" ? (
+          <SlideEditorPage />
         ) : page === "merge" ? (
           <MergeSlidesPage />
         ) : (
