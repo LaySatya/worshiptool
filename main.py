@@ -2170,6 +2170,24 @@ class SongPreviewRequest(BaseModel):
     song_title:  str = ""
 
 
+def _star_marker(line: str) -> str | None:
+    """
+    Verse marker for `*` / `**` / `***` lines, or None.
+
+    korapraise.com (and many hand-typed lyric sheets) number verses with
+    asterisks: `*` = verse 1, `**` = verse 2, `***` = verse 3.  The line may
+    carry the lyric text after the marker, or be the marker on its own.
+
+    Returns the Khmer digit for that verse, or None when the line is not a
+    marker.
+    """
+    m = re.match(r'^\s*(\*{1,5})(\s+|$)', line)
+    if not m:
+        return None
+    count = len(m.group(1))
+    return to_khmer_number(str(count))
+
+
 def parse_song_lyrics(raw_text: str) -> list[dict]:
     """
     Parses hymn / song lyrics into structured slides:
@@ -2183,23 +2201,27 @@ def parse_song_lyrics(raw_text: str) -> list[dict]:
 
     lines = raw_text.splitlines()
 
-    # Detect verse markers: e.g. '១~', '1~', '១.', '1.', '2.', '២.'
+    # Detect verse markers:
+    #   • numbered styles: '១~', '1~', '១.', '1.', '2.'  (hymn books)
+    #   • asterisk styles:  '*', '**', '***'                (korapraise / typed)
     VERSE_START_RE = re.compile(r'(?:^|\s+)([0-9០-៩]+)\s*[\~\.\:\-\)]')
     CHORUS_RE = re.compile(r'(?:បន្ទរ\s*[\:\៖]?|Chorus\s*[\:\៖]?)')
 
-    has_verse_marker = any(VERSE_START_RE.search(l) for l in lines)
+    has_verse_marker = any(
+        VERSE_START_RE.search(l) or _star_marker(l) for l in lines
+    )
     has_chorus_marker = any(CHORUS_RE.search(l) for l in lines)
 
     # Hymn structure with markers
     if has_verse_marker or has_chorus_marker:
         body_start_line = len(lines)
         for i, line in enumerate(lines):
-            if VERSE_START_RE.search(line.strip()):
+            if VERSE_START_RE.search(line.strip()) or _star_marker(line):
                 body_start_line = i
                 break
 
         header_lines = [l.strip() for l in lines[:body_start_line] if l.strip()]
-        body_text = ' '.join(lines[body_start_line:]).strip()
+        body_lines = lines[body_start_line:]
 
         slides = []
 
@@ -2218,40 +2240,84 @@ def parse_song_lyrics(raw_text: str) -> list[dict]:
                 'lines': [title] + ([subtitle] if subtitle else []) + ([category] if category else []),
             })
 
-        if body_text:
+        if any(l.strip() for l in body_lines):
+            # ── Split on markers ANYWHERE in the body ────────────────
+            #
+            # Hymn books put every verse on ONE long line:
+            #   "១~នៅពេញ... ២.នៅពេញ... បន្ទរ៖ផ្សាយ... ៣.នៅពេញ..."
+            # so a marker is not necessarily at the start of a line.  Scanning
+            # for markers anywhere is what produces the original 4-slide
+            # result for Hymn 299.
+            #
+            # Line breaks WITHIN a verse are preserved: the section text is
+            # split on newlines, not flattened into one string.
+            body_text = '\n'.join(body_lines)
+
+            # One combined regex covering all marker styles:
+            #   ១~  ២.  1.  |  *  **  ***  |  បន្ទរ  បន្ទរ៖  Chorus
             MARKER_RE = re.compile(
-                r'(?:(?:^|\s+)(?P<verse>[0-9០-៩]+)\s*[\~\.\:\-\)]\s*)|(?:(?:^|\s+)(?P<chorus>បន្ទរ\s*[\:\៖]?|Chorus\s*[\:\៖]?)\s*)'
+                r'(?:'
+                r'(?<![0-9០-៩])([0-9០-៩]+)\s*[\~\.\:\-\)]\s*'    # numbered
+                r'|(?<![\*\S])(\*{1,5})(?=\s|\n|$)\s*'              # asterisk
+                r'|(?:បន្ទរ\s*[\:\៖]?|Chorus\s*[\:\៖]?)'              # chorus
+                r')'
             )
-            matches = list(MARKER_RE.finditer(body_text))
-            if matches:
-                for idx, m in enumerate(matches):
-                    start = m.end()
-                    end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body_text)
-                    content = body_text[start:end].strip()
-                    if not content:
-                        continue
-                    if m.group('verse'):
-                        v_num = to_khmer_number(m.group('verse'))
-                        slides.append({
-                            'is_title': False,
-                            'title': '',
-                            'subtitle': '',
-                            'category': '',
-                            'prefix': v_num,
-                            'prefix_color': 'verse',
-                            'lines': [content],
-                        })
-                    elif m.group('chorus'):
-                        slides.append({
-                            'is_title': False,
-                            'title': '',
-                            'subtitle': '',
-                            'category': '',
-                            'prefix': 'R.',
-                            'prefix_color': 'red',
-                            'lines': [content],
-                        })
-            else:
+
+            sections: list[dict] = []
+            last = 0
+            for m in MARKER_RE.finditer(body_text):
+                # text between the previous marker and this one
+                pre = body_text[last:m.start()]
+                if pre.strip():
+                    if sections:
+                        sections[-1]['text'] += '\n' + pre
+                    else:
+                        sections.append(
+                            {'prefix': '', 'prefix_color': '', 'text': pre}
+                        )
+
+                if m.group(1):                       # numbered verse
+                    sections.append({
+                        'prefix': to_khmer_number(m.group(1)),
+                        'prefix_color': 'verse',
+                        'text': '',
+                    })
+                elif m.group(2):                     # asterisk verse
+                    sections.append({
+                        'prefix': to_khmer_number(str(len(m.group(2)))),
+                        'prefix_color': 'verse',
+                        'text': '',
+                    })
+                else:                                # chorus
+                    sections.append({
+                        'prefix': 'R.',
+                        'prefix_color': 'red',
+                        'text': '',
+                    })
+                last = m.end()
+
+            tail = body_text[last:]
+            if tail.strip():
+                if sections:
+                    sections[-1]['text'] += '\n' + tail
+                else:
+                    sections.append({'prefix': '', 'prefix_color': '', 'text': tail})
+
+            for sec in sections:
+                verse_lines = [l.strip() for l in sec['text'].splitlines() if l.strip()]
+                if not verse_lines:
+                    continue
+                slides.append({
+                    'is_title': False,
+                    'title': '',
+                    'subtitle': '',
+                    'category': '',
+                    'prefix': sec['prefix'],
+                    'prefix_color': sec['prefix_color'],
+                    'lines': verse_lines,
+                })
+
+            if not slides:
                 slides.append({
                     'is_title': False,
                     'title': '',
@@ -2259,7 +2325,7 @@ def parse_song_lyrics(raw_text: str) -> list[dict]:
                     'category': '',
                     'prefix': '',
                     'prefix_color': '',
-                    'lines': [body_text],
+                    'lines': [l.strip() for l in body_lines if l.strip()],
                 })
         return slides
 
@@ -4087,6 +4153,268 @@ def bible_proxy(path: str, request: Request):
     if len(_PROXY_CACHE) > _MAX_PROXY_CACHE_ENTRIES:
         _PROXY_CACHE.clear()
     _PROXY_CACHE[url] = (body, content_type, headers, now + ttl)
+
+    return Response(content=body, media_type=content_type, headers=headers)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  KoraPraise lyrics-slide proxy
+#  Serves the embedded iframe same-origin so its "download .txt" button can
+#  be intercepted and the lyrics pushed straight into the Song Slides editor.
+# ═══════════════════════════════════════════════════════════════════
+
+_KORA_PROXY_BASE = "https://www.korapraise.com/lyrics-slide"
+
+# Injected into the proxied page.  The site builds its .txt with
+#   new Blob([text]) -> URL.createObjectURL -> <a download>.click()
+# so we wrap Blob/URL and post the text to the parent window instead of
+# letting the browser save a file.  A postMessage bridge is used because the
+# iframe is same-origin, but the anchor-click handoff still needs to happen
+# inside the frame.
+_KORA_BRIDGE = r"""
+<script>
+(function () {
+  'use strict';
+  window.__koraBridgeV = 1;
+
+  function send(text, name) {
+    try {
+      parent.postMessage(
+        { source: 'korapraise', type: 'lyrics-txt', text: text, filename: name || 'lyrics.txt' },
+        '*'
+      );
+    } catch (e) {}
+  }
+
+  // Read a Blob as text and remember it, so the download click can forward it.
+  function remember(blob) {
+    try {
+      if (!blob || typeof blob.text !== 'function') return;
+      blob.text().then(function (t) { window.__koraLastText = t; }, function () {});
+    } catch (e) {}
+  }
+
+  // --- Intercept URL.createObjectURL (the site makes a blob URL for the txt)
+  var nativeCreate = URL.createObjectURL;
+  URL.createObjectURL = function (obj) {
+    remember(obj);
+    return nativeCreate.apply(URL, arguments);
+  };
+
+  // --- Intercept the <a download> click and post the text to the parent ---
+  var nativeClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    var isDownload = this.hasAttribute('download');
+    if (!isDownload) return nativeClick.apply(this, arguments);
+
+    var name = this.getAttribute('download') || 'lyrics.txt';
+    var start = Date.now();
+
+    (function waitForText() {
+      var txt = window.__koraLastText;
+      if (txt == null && Date.now() - start < 2000) {
+        // The blob may still be being created — check the href blob too.
+        return setTimeout(waitForText, 40);
+      }
+      if (txt != null) {
+        send(txt, name);
+      } else {
+        // Fall back: fetch the href of the blob URL.
+        try {
+          var href = this && this.href;
+          if (href) fetch(href).then(function (r) { return r.text(); })
+            .then(function (t) { send(t, name); }, function () {});
+        } catch (e) {}
+      }
+    }).call(this);
+
+    // Do not actually save a file — the parent app takes over.
+    return undefined;
+  };
+})();
+</script>
+"""
+
+
+def _inject_kora_bridge(html: bytes) -> bytes:
+    """
+    Add the download bridge EARLY so it wraps Blob/URL before the page's own
+    scripts use them.  Injecting at </body> is too late — the site creates its
+    download helper on load — so the script goes immediately after <head>.
+    """
+    bridge = _KORA_BRIDGE.encode("utf-8")
+    lower = html.lower()
+
+    # Inject as early as possible but AFTER <meta charset>, otherwise the
+    # browser may decode the page before knowing the encoding and the inline
+    # script never runs.
+    charset_idx = lower.find(b"charset")
+    if charset_idx != -1:
+        meta_end = lower.find(b">", charset_idx)
+        if meta_end != -1:
+            return html[:meta_end + 1] + bridge + html[meta_end + 1:]
+
+    # Prefer the opening <head> so the patch is installed first.
+    idx = lower.find(b"<head>")
+    if idx != -1:
+        insert_at = idx + len(b"<head>")
+        return html[:insert_at] + bridge + html[insert_at:]
+
+    # No <head>: fall back to the very start of the document.
+    idx = lower.find(b"<html")
+    if idx != -1:
+        close = lower.find(b">", idx)
+        if close != -1:
+            return html[:close + 1] + bridge + html[close + 1:]
+
+    return bridge + html
+
+
+_KORA_PROXY_PREFIX = "/api/kora-proxy/"
+
+# src="x.js" / href="x.css" / url(...) style references in the HTML.
+_ATTR_URL_RE = re.compile(
+    r'(\b(?:src|href)\s*=\s*["\'])([^"\']+)(["\'])'
+)
+
+
+def _kora_rewrite_one(url: str, base_dir: str) -> str:
+    """
+    Rewrite a single URL found in the proxied page.
+
+    The upstream site is served from a sub-directory (/lyrics-slide/), so its
+    assets are written RELATIVE ("database-loader.js") or ROOT-ABSOLUTE
+    ("/logo.png").  Left as-is they resolve against the local app host, hit
+    the SPA fallback and return index.html — the browser then rejects an HTML
+    body where it expected JavaScript, and the iframe renders blank.
+    """
+    u = (url or "").strip()
+    if not u:
+        return url
+    # Leave data:/blob:/mailto:/tel:/javascript: and fragment links alone
+    if u.startswith(("data:", "blob:", "mailto:", "tel:", "javascript:", "#")):
+        return url
+    # Already proxied
+    if u.startswith(_KORA_PROXY_PREFIX) or u.startswith("//"):
+        return url
+
+    # Absolute URLs on the upstream host -> local proxy
+    if u.startswith((
+        "https://www.korapraise.com/lyrics-slide/",
+        "http://www.korapraise.com/lyrics-slide/",
+        "https://korapraise.com/lyrics-slide/",
+        "http://korapraise.com/lyrics-slide/",
+    )):
+        u = re.sub(
+            r"^https?://(?:www\.)?korapraise\.com/lyrics-slide/?",
+            _KORA_PROXY_PREFIX,
+            u,
+        )
+        return u   # do NOT fall through — already rewritten
+
+    if u.startswith(("http://", "https://")):
+        return u   # genuinely external (CDN etc.) — leave untouched
+
+    # Root-absolute ("/logo.png") — the site lives under /lyrics-slide/
+    if u.startswith("/"):
+        return _KORA_PROXY_PREFIX + u.lstrip("/")
+
+    # Relative ("database-loader.js") — resolve against the page's directory
+    return _KORA_PROXY_PREFIX + base_dir + u
+
+
+def _rewrite_kora_urls(html: str, base_dir: str = "") -> str:
+    """Point every asset/link in the page back through this proxy."""
+
+    def _sub(m: re.Match) -> str:
+        return m.group(1) + _kora_rewrite_one(m.group(2), base_dir) + m.group(3)
+
+    # Attribute rewriting handles both the absolute upstream URLs and the
+    # relative / root-absolute ones in one pass.  (Doing a blanket string
+    # replace first produced a doubled "/api/kora-proxy/api/kora-proxy/"
+    # prefix, because the rewritten value was then rewritten again.)
+    html = _ATTR_URL_RE.sub(_sub, html)
+
+    # CSS url(...) references inside inline styles
+    def _css_sub(m: re.Match) -> str:
+        raw = m.group(1).strip("\"' ")
+        return "url(" + _kora_rewrite_one(raw, base_dir) + ")"
+
+    html = re.sub(r"url\(([^)]+)\)", _css_sub, html)
+    return html
+
+
+@app.get("/api/kora-proxy")
+def kora_proxy_root(request: Request):
+    """Bare path -> the lyrics-slide index page."""
+    return kora_proxy("index.html", request)
+
+
+@app.get("/api/kora-proxy/{path:path}")
+def kora_proxy(path: str, request: Request):
+    """
+    Proxy korapraise.com/lyrics-slide so the page runs same-origin.
+
+    Same-origin (rather than a direct iframe to the site) is required so the
+    parent app can post messages and auto-import the downloaded lyrics.
+    """
+    if not path or path.endswith("/"):
+        path = (path or "") + "index.html"
+
+    url = f"{_KORA_PROXY_BASE}/{path}"
+    query = request.url.query
+    if query:
+        url += f"?{query}"
+
+    cache_key = f"kora::{url}"
+    now = time.time()
+    if cache_key in _PROXY_CACHE:
+        body, media_type, headers, expires_at = _PROXY_CACHE[cache_key]
+        if now < expires_at:
+            return Response(content=body, media_type=media_type, headers=headers)
+
+    try:
+        resp = _proxy_session.get(
+            url,
+            timeout=25,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Referer": "https://www.korapraise.com/lyrics-slide/",
+                "Accept-Encoding": "gzip, deflate",
+            },
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach korapraise.com")
+
+    content_type = resp.headers.get("content-type", "application/octet-stream")
+    body = resp.content
+
+    if "text/html" in content_type:
+        # Relative asset URLs must resolve against THIS page's directory.
+        base_dir = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        text = _rewrite_kora_urls(
+            body.decode("utf-8", errors="replace"),
+            base_dir=base_dir,
+        )
+        body = _inject_kora_bridge(text.encode("utf-8"))
+        content_type = "text/html; charset=utf-8"
+
+    # The proxied page must never be cached by the browser for long, and must
+    # be allowed to be framed by the local app.
+    headers = {
+        "Cache-Control": "no-store" if "text/html" in content_type else "max-age=600",
+        "X-Frame-Options": "SAMEORIGIN",
+    }
+
+    if len(_PROXY_CACHE) > _MAX_PROXY_CACHE_ENTRIES:
+        _PROXY_CACHE.clear()
+    ttl = 0 if "text/html" in content_type else 600
+    if ttl:
+        _PROXY_CACHE[cache_key] = (body, content_type, headers, now + ttl)
 
     return Response(content=body, media_type=content_type, headers=headers)
 

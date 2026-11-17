@@ -13,6 +13,7 @@ import {
   Sparkles,
   FileUp,
   Settings,
+  Globe,
 } from 'lucide-react'
 import SongSettingsPanel from './components/SongSettingsPanel.jsx'
 import SongPreviewPanel from './components/SongPreviewPanel.jsx'
@@ -62,6 +63,7 @@ export default function SongSlidePage() {
   const [extracting, setExtracting] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [toast, setToast] = useState(null)
+  const [koraOpen, setKoraOpen] = useState(false)
 
   const fileInputRef = useRef(null)
 
@@ -91,6 +93,27 @@ export default function SongSlidePage() {
     return () => { cancelled = true }
   }, [dLyrics, dSettings, dTitle])
 
+  // ── Import plain lyrics text (used by .txt upload AND the KoraPraise iframe) ──
+  const importLyricsText = useCallback((text, sourceName) => {
+    const body = (text || '').replace(/\r\n/g, '\n').trim()
+    if (!body) {
+      setToast({ message: 'The downloaded file is empty.', type: 'error' })
+      return
+    }
+    setLyricsText(body)
+    if (sourceName) {
+      const guessedTitle = sourceName
+        .replace(/\.[^.]+$/, '')
+        .replace(/[-_]+/g, ' ')
+        .trim()
+      if (guessedTitle) setSongTitle(guessedTitle)
+    }
+    setToast({
+      message: `Lyrics imported${sourceName ? ` from "${sourceName}"` : ''} — slides ready.`,
+      type: 'success',
+    })
+  }, [])
+
   // ── File Import (.txt directly or OCR for images/PDF) ───────────
   const handleFileImport = useCallback(async (file) => {
     if (!file) return
@@ -99,10 +122,7 @@ export default function SongSlidePage() {
     if (file.name.toLowerCase().endsWith('.txt') || file.type.startsWith('text/')) {
       try {
         const text = await file.text()
-        setLyricsText(text)
-        const guessedTitle = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
-        setSongTitle(guessedTitle)
-        setToast({ message: `Imported "${file.name}"! Slides ready.`, type: 'success' })
+        importLyricsText(text, file.name)
       } catch {
         setToast({ message: 'Could not read text file.', type: 'error' })
       }
@@ -128,7 +148,23 @@ export default function SongSlidePage() {
         setExtracting(false)
       }
     }
-  }, [])
+  }, [importLyricsText])
+
+  // ── KoraPraise iframe bridge ────────────────────────────────────
+  // The proxied /api/kora-proxy page intercepts its own "download .txt"
+  // button and posts the lyrics here, so the user never handles a file.
+  useEffect(() => {
+    const onMessage = (event) => {
+      const data = event.data
+      if (!data || data.source !== 'korapraise' || data.type !== 'lyrics-txt') return
+      if (typeof data.text !== 'string' || !data.text.trim()) return
+
+      importLyricsText(data.text, data.filename)
+      setKoraOpen(false)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [importLyricsText])
 
   // ── Drag & drop handlers ─────────────────────────────────────────
   const onDrop = (e) => {
@@ -208,6 +244,16 @@ export default function SongSlidePage() {
           >
             {extracting ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} className="text-brand-500" />}
             <span>Import .txt File</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setKoraOpen(true)}
+            className="btn-secondary !py-2 !px-3 text-xs flex items-center gap-1.5 hover:border-brand-300 hover:text-brand-600"
+            title="Browse KoraPraise lyrics — downloads import here automatically"
+          >
+            <Globe size={13} className="text-brand-500" />
+            <span>KoraPraise Lyrics</span>
           </button>
 
           <button
@@ -296,6 +342,7 @@ export default function SongSlidePage() {
                 <ul className="list-disc list-inside space-y-0.5 text-slate-600">
                   <li><strong>Header lines:</strong> First lines before verse become the <strong>Title Slide</strong>.</li>
                   <li><strong>Verses:</strong> Marked with <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">១~</code>, <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">២.</code>, <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">1.</code>, etc. (each verse = one slide).</li>
+                  <li><strong>Asterisk verses:</strong> <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">*</code>, <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">**</code>, <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">***</code> mean verse <strong>១, ២, ៣</strong> — used by KoraPraise downloads. Line breaks are kept.</li>
                   <li><strong>Chorus:</strong> Word <code className="px-1 py-0.5 rounded bg-slate-200 text-slate-800">បន្ទរ</code> is replaced by <strong className="text-red-500">R.</strong> (colored red) on its own slide.</li>
                 </ul>
               </div>
@@ -341,6 +388,81 @@ export default function SongSlidePage() {
           )}
         </div>
       </div>
+
+      {/* ── KoraPraise lyrics popup ─────────────────────────────── */}
+      {koraOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs animate-fade-in"
+          onClick={() => setKoraOpen(false)}
+        >
+          <div
+            className="w-full max-w-6xl h-[88vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* header */}
+            <div className="h-12 bg-white border-b border-slate-200 px-4 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center">
+                  <Globe size={15} />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-800 leading-tight">
+                    KoraPraise — Lyrics Slides
+                  </h3>
+                  <p className="text-[11px] text-slate-400 hidden sm:block leading-none">
+                    Click “Download .txt” inside this window — the lyrics import
+                    into the editor automatically
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setKoraOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* iframe body (proxied so downloads can be intercepted) */}
+            <div className="flex-1 min-h-0 bg-slate-50">
+              <iframe
+                key={koraOpen ? 'kora-open' : 'kora-closed'}
+                src="/api/kora-proxy/index.html"
+                title="KoraPraise Lyrics"
+                className="w-full h-full border-0 bg-white"
+                allow="clipboard-read; clipboard-write"
+              />
+            </div>
+
+            {/* footer */}
+            <div className="p-3 border-t border-slate-200 bg-white flex items-center justify-between text-xs flex-shrink-0 gap-3">
+              <span className="flex items-center gap-1.5 text-emerald-700 font-medium text-[11px] sm:text-xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Waiting for a lyrics download…
+              </span>
+              <div className="flex items-center gap-2">
+                <a
+                  href="https://www.korapraise.com/lyrics-slide/index.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-slate-400 hover:text-brand-600 underline"
+                >
+                  Open site
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setKoraOpen(false)}
+                  className="btn-primary !py-1.5 !px-4 text-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
