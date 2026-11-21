@@ -54,8 +54,19 @@ function Toast({ message, type = "success", onClose }) {
   );
 }
 
-export default function MathematicPage() {
-  const [activeTab, setActiveTab] = useState("dashboard"); // 'dashboard' | 'students' | 'scores' | 'report' | 'rules'
+const MATH_TABS = ["dashboard", "students", "scores", "report", "rules"];
+
+/**
+ * tab / onTabChange are controlled by App so the selected tab lives in the URL
+ * hash and survives a page refresh.
+ */
+export default function MathematicPage({ tab, onTabChange }) {
+  const [localTab, setLocalTab] = useState("dashboard");
+  const activeTab = MATH_TABS.includes(tab) ? tab : localTab;
+  const setActiveTab = (next) => {
+    setLocalTab(next);
+    onTabChange?.(next);
+  }; // 'dashboard' | 'students' | 'scores' | 'report' | 'rules'
   const [students, setStudents] = useState([]);
   const [scores, setScores] = useState([]);
   const [rules, setRules] = useState(DEFAULT_GRADE_RULES);

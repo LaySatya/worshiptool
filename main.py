@@ -4419,6 +4419,160 @@ def kora_proxy(path: str, request: Request):
     return Response(content=body, media_type=content_type, headers=headers)
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  Textbook library — FlipHTML5 reader proxy
+# ═══════════════════════════════════════════════════════════════════
+#
+# The school books live on online.fliphtml5.com, which answers every request
+# with `Content-Security-Policy: frame-ancestors 'self'` — the browser then
+# refuses to render the book inside our app. Serving the same files through
+# this same-origin proxy drops that header, so a book can be embedded, paged
+# and read while the teacher stays inside SYASKYTOOL.
+#
+#   /api/flipbook/riaxr/gura/          -> https://online.fliphtml5.com/riaxr/gura/
+#   /api/flipbook/vtzsn/hqme/files/…   -> the book's own assets
+_FLIPBOOK_BASE = "https://online.fliphtml5.com"
+_FLIPBOOK_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_FLIPBOOK_CACHE: dict = {}
+_FLIPBOOK_CACHE_MAX = 800
+_FLIPBOOK_HTML_TTL = 300
+_FLIPBOOK_ASSET_TTL = 86400
+
+
+def _rewrite_flipbook_urls(text: str, dir_path: str) -> str:
+    """Point every absolute fliphtml5.com URL back through this proxy."""
+    for host in ("https://online.fliphtml5.com", "//online.fliphtml5.com", "http://online.fliphtml5.com"):
+        text = text.replace(host, "/api/flipbook")
+    # Root-relative asset paths (e.g. src="/riaxr/gura/files/…") must resolve
+    # against the book directory rather than this app's own root.
+    text = re.sub(
+        r'(?P<prefix>(?:src|href|poster)\s*=\s*["\'])/(?!/)(?P<path>[^"\'#?]+)',
+        lambda m: f'{m.group("prefix")}/api/flipbook/{dir_path}{m.group("path")}',
+        text,
+    )
+    return text
+
+
+def _inject_flipbook_bridge(html: str) -> str:
+    """Bridge the book frame and its parent window.
+
+    The FlipHTML5 viewer (and its sibling viewer frames) keep the current page
+    in the document hash (#p=N). When the reader turns a page inside the frame
+    we mirror it to the top window hash so the app toolbar follows along, and
+    when the app asks for a specific page we push it back into the frame.
+    """
+    script = """<script>
+(function () {
+  var KEY = '__syaskytoolFlipbook';
+  var isTop = (function () { try { return window.top === window.self; } catch (e) { return false; } })();
+  if (isTop) {
+    // Serve as the relay between the embedded viewer and the app window.
+    if (window[KEY]) { try { window[KEY](); } catch (e) {} }
+    window[KEY] = function () {};
+  }
+  function pageFromHash() {
+    var m = (window.location.hash || '').match(/[#&?]p=(\\d+)/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+  function announce() {
+    var p = pageFromHash();
+    if (!p) return;
+    try {
+      if (isTop) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ source: 'syaskytool-flipbook', type: 'page', page: p }, '*');
+        }
+      } else if (window.parent) {
+        window.parent.postMessage({ source: 'syaskytool-flipbook', type: 'page', page: p }, '*');
+      }
+    } catch (e) {}
+  }
+  window.addEventListener('hashchange', announce, false);
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.source !== 'syaskytool-flipbook-host') return;
+    if (d.type === 'go' && d.page && !isTop) {
+      try {
+        if (window.fb && window.fb.ui && window.fb.ui.gotoPage) window.fb.ui.gotoPage(d.page);
+        else if (window.fb && typeof window.fb.gotoPage === 'function') window.fb.gotoPage(d.page);
+        else window.location.hash = 'p=' + d.page;
+      } catch (err) { window.location.hash = 'p=' + d.page; }
+    }
+  }, false);
+  window.addEventListener('load', function () { setTimeout(announce, 400); }, false);
+})();
+</script>"""
+    low = html.lower()
+    idx = low.rfind("</head>")
+    if idx == -1:
+        return script + html
+    return html[:idx] + script + html[idx:]
+
+
+# NOTE: this route is registered further down (after the SPA catch-all walker),
+# because a `/{path:path}` route declared here would shadow `/` and every other
+# page of the frontend.
+def flipbook_proxy(path: str, request: Request):
+    """Same-origin proxy for the FlipHTML5 textbooks (see notes above)."""
+    path = path.lstrip("/") or ""
+    # Book ids look like `<user>/<book>/…`; never let a traversal escape.
+    if ".." in path.split("/"):
+        raise HTTPException(status_code=400, detail="Invalid book path")
+    url = f"{_FLIPBOOK_BASE}/{path}"
+    if request.url.query:
+        url += f"?{request.url.query}"
+
+    now = time.time()
+    cached = _FLIPBOOK_CACHE.get(url)
+    if cached and now < cached[3]:
+        return Response(content=cached[0], media_type=cached[1], headers=cached[2])
+
+    is_book_root = bool(path) and path.count("/") == 1 or not path
+    referer = f"{_FLIPBOOK_BASE}/{path.rsplit('/', 1)[0] + '/' if '/' in path else ''}"
+    try:
+        resp = _proxy_session.get(
+            url,
+            timeout=30,
+            headers={
+                "User-Agent": _FLIPBOOK_UA,
+                "Referer": referer,
+                "Accept-Encoding": "gzip, deflate",
+            },
+            allow_redirects=True,
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach online.fliphtml5.com")
+    if resp.status_code != 200:
+        return Response(content=resp.content, status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type", "text/plain"))
+
+    content_type = resp.headers.get("content-type", "application/octet-stream")
+    body = resp.content
+    if "text/html" in content_type:
+        dir_path = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        text = _rewrite_flipbook_urls(body.decode("utf-8", errors="replace"), dir_path)
+        body = _inject_flipbook_bridge(text).encode("utf-8")
+        content_type = "text/html; charset=utf-8"
+        ttl = 0 if is_book_root else _FLIPBOOK_HTML_TTL
+    else:
+        ttl = _FLIPBOOK_ASSET_TTL
+
+    headers = {
+        "Cache-Control": f"public, max-age={ttl}" if ttl else "no-store",
+        # The proxied book must be allowed to be framed by this app.
+        "X-Frame-Options": "SAMEORIGIN",
+        "Access-Control-Allow-Origin": "*",
+    }
+    if ttl:
+        if len(_FLIPBOOK_CACHE) > _FLIPBOOK_CACHE_MAX:
+            _FLIPBOOK_CACHE.clear()
+        _FLIPBOOK_CACHE[url] = (body, content_type, headers, now + ttl)
+    return Response(content=body, media_type=content_type, headers=headers)
+
+
 # ── Static frontend (Vite build) ─────────────────────────────────
 # Mount the built React app so a single deployment serves everything.
 # On Render: build.sh runs `npm run build` before gunicorn starts,
@@ -4448,6 +4602,15 @@ def _setup_static() -> None:
     # SPA catch-all — must be defined at module level (not inside a conditional)
     # so gunicorn workers inherit it correctly after fork.
 
+# Textbook library proxy — must be registered BEFORE the `/{full_path:path}`
+# catch-all below, or the catch-all shadows it and books never load.
+app.add_api_route(
+    "/api/flipbook/{path:path}",
+    flipbook_proxy,
+    methods=["GET"],
+    include_in_schema=False,
+)
+
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
     """Catch-all: serve index.html for any path not matched by /api routes."""
@@ -4458,5 +4621,6 @@ async def serve_spa(full_path: str):
     if candidate.is_file():
         return FileResponse(str(candidate))
     return FileResponse(str(index))
+
 
 _setup_static()

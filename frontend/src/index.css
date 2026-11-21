@@ -60,4 +60,45 @@
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   .animate-fade-in { animation: fadeIn 0.2s ease; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* Page-switch entry animation (fires on every navigation click) */
+  .page-enter { animation: pageEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @keyframes pageEnter {
+    from { opacity: 0; transform: translateY(14px) scale(0.995); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .page-enter { animation: none; }
+  }
+
+  /* Cover page animations */
+  .cover-anim { animation: coverFadeUp 0.5s ease both; }
+  .cover-anim-d1 { animation: coverFadeUp 0.5s ease 0.08s both; }
+  .cover-anim-d2 { animation: coverFadeUp 0.5s ease 0.16s both; }
+  .cover-anim-d3 { animation: coverFadeUp 0.5s ease 0.24s both; }
+  .cover-anim-d4 { animation: coverFadeUp 0.5s ease 0.32s both; }
+  .cover-anim-d5 { animation: coverFadeUp 0.5s ease 0.4s both; }
+  @keyframes coverFadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: none; }
+  }
+  .cover-anim-pop { animation: coverPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  @keyframes coverPop {
+    from { opacity: 0; transform: scale(0.85); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .cover-anim-logo { animation: logoSpin 18s linear infinite; }
+  @keyframes logoSpin { to { transform: rotate(360deg); } }
+  .cover-anim-badge { animation: badgePulse 2.4s ease-in-out infinite; }
+  @keyframes badgePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.28); }
+    50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+  }
+  @media print {
+    .cover-anim, .cover-anim-d1, .cover-anim-d2,
+    .cover-anim-d3, .cover-anim-d4, .cover-anim-d5,
+    .cover-anim-pop, .cover-anim-badge {
+      animation: none !important;
+    }
+  }
 }

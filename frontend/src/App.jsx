@@ -19,6 +19,11 @@ import {
   Calculator,
   ScanText,
   SlidersHorizontal,
+  Church,
+  School,
+  Library,
+  Clock,
+  BookMarked,
 } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import PreviewPanel from "./components/PreviewPanel.jsx";
@@ -29,8 +34,46 @@ import MelodySlidePage from "./MelodySlidePage.jsx";
 import MathematicPage from "./MathematicPage.jsx";
 import SongExtractPage from "./SongExtractPage.jsx";
 import SlideEditorPage from "./SlideEditorPage.jsx";
+import BooksLibrary from "./components/books/BooksLibrary.jsx";
+import BookCoverPage from "./components/cover/BookCoverPage.jsx";
 import { fetchPreview, generatePptx } from "./api.js";
 import { DEFAULT_SETTINGS } from "./constants.js";
+import {
+  CHURCH_PAGES,
+  MAINTAINING_PAGES,
+  buildHash,
+  parseHash,
+} from "./navigation.js";
+
+// Sidebar entries. Everything worship-related lives under "Church";
+// teaching tools live under "School"; the textbooks have their own "Books" page.
+const CHURCH_NAV = [
+  { id: "bible", label: "Bible Slides", icon: BookOpen },
+  { id: "song", label: "Song Slides", icon: Music },
+  { id: "cover", label: "Book Cover", icon: BookMarked },
+  { id: "melody", label: "Melody Slide", icon: FileMusic },
+  { id: "extract", label: "Song File Extract", icon: ScanText },
+  { id: "editor", label: "Slide Editor", icon: SlidersHorizontal },
+  { id: "merge", label: "Merge Slides", icon: Merge },
+];
+
+const SCHOOL_NAV = [
+  { id: "math", label: "Mathematic", icon: Calculator },
+];
+
+const PAGE_META = {
+  bible: { title: "Bible Slides", icon: BookOpen },
+  melody: { title: "Melody Slide", icon: FileMusic },
+  song: { title: "Song Slides", icon: Music },
+  extract: { title: "Song File Extract", icon: ScanText },
+  editor: { title: "Slide Editor", icon: SlidersHorizontal },
+  merge: { title: "Merge Slides", icon: Merge },
+  cover: { title: "Book Cover", icon: BookMarked },
+  math: { title: "Mathematic", icon: Calculator },
+  books: { title: "Books", icon: Library },
+};
+
+const pageOf = (id) => PAGE_META[id] || PAGE_META.bible;
 
 function useDebounce(value, delay) {
   const [debounced, setDebounced] = useState(value);
@@ -81,7 +124,10 @@ Romans 8:28
 And we know that in all things God works for the good of those who love him.`;
 
 export default function App() {
-  const [page, setPage] = useState("bible"); // 'bible' | 'melody' | 'song' | 'extract' | 'merge' | 'math'
+  // The whole navigation lives in the URL hash, so a refresh (or a bookmark)
+  // restores exactly the page, tab and book the user was on.
+  const [nav, setNav] = useState(() => parseHash(window.location.hash));
+  const { page } = nav; // 'bible' | 'song' | 'cover' | 'melody' | 'extract' | 'editor' | 'merge' | 'math' | 'books'
   const [rawText, setRawText] = useState("");
   const [reference, setReference] = useState("");
   const [perSlide, setPerSlide] = useState(1);
@@ -97,6 +143,34 @@ export default function App() {
   const [bibleModalOpen, setBibleModalOpen] = useState(false);
 
   const lastSelectedTextRef = useRef(null);
+
+  /** Change navigation: update state, restore it on refresh via the hash. */
+  const navigate = useCallback((patch) => {
+    setNav((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.books) next.books = { ...prev.books, ...patch.books };
+      const hash = buildHash(next);
+      if (window.location.hash !== hash) {
+        window.history.replaceState(null, "", hash);
+      }
+      return next;
+    });
+  }, []);
+
+  const goPage = useCallback(
+    (id) => {
+      navigate({ page: id });
+      setSidebarOpen(false);
+    },
+    [navigate],
+  );
+
+  // Keep the app in sync with manual hash edits and the browser back button.
+  useEffect(() => {
+    const onHashChange = () => setNav(parseHash(window.location.hash));
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   const dRawText = useDebounce(rawText, 350);
   const dReference = useDebounce(reference, 300);
@@ -212,18 +286,23 @@ export default function App() {
 
       {/* Left Sidebar Drawer (Default Closed, slides out when opened) */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 w-72 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-in-out
+        className={`fixed top-0 bottom-0 left-0 w-80 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-in-out
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
       >
         {/* Sidebar Header */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs flex-shrink-0">
               <BookOpen size={16} className="text-white" />
             </div>
-            <span className="font-bold text-slate-800 tracking-tight text-lg">
-              ChurchTool
-            </span>
+            <div className="min-w-0">
+              <span className="block font-extrabold text-slate-800 tracking-tight text-lg leading-tight">
+                SYASKYTOOL
+              </span>
+              <span className="block text-[10px] font-medium text-slate-400 leading-tight truncate">
+                Church &amp; School suite
+              </span>
+            </div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -234,132 +313,124 @@ export default function App() {
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
-          <button
-            onClick={() => {
-              setPage("bible");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "bible"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <BookOpen size={18} />
-            <span>Bible Slides</span>
-            {page === "bible" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
+        {/* Navigation — grouped: Church · School · Books */}
+        <nav className="flex-1 p-3 overflow-y-auto space-y-4">
+          {/* ── Church group ── */}
+          <div>
+            <div className="flex items-center gap-2 px-2 pb-1.5">
+              <Church size={13} className="text-slate-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Church
+              </span>
+            </div>
+            <div className="space-y-1">
+              {CHURCH_NAV.map(({ id, label, icon: Icon }) => {
+                const active = page === id;
+                const pending = MAINTAINING_PAGES.includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => goPage(id)}
+                    className={`w-full flex items-center gap-2.5 pl-2.5 pr-2 py-2.5 rounded-xl text-[13px] font-semibold transition-all
+                      ${
+                        active
+                          ? "bg-brand-50 text-brand-600 border border-brand-200"
+                          : "text-slate-600 border border-transparent hover:bg-slate-50"
+                      }`}
+                  >
+                    <Icon size={17} className={`flex-shrink-0 ${active ? "text-brand-500" : "text-slate-400"}`} />
+                    <span className="truncate text-left">{label}</span>
+                    {pending && (
+                      <span
+                        className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold uppercase tracking-tight whitespace-nowrap flex-shrink-0"
+                        title="This tool is still being maintained"
+                      >
+                        <Clock size={9} />
+                        Maintaining
+                      </span>
+                    )}
+                    {active && !pending && (
+                      <ChevronRight size={15} className="ml-auto text-brand-500 flex-shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-          <button
-            onClick={() => {
-              setPage("melody");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "melody"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <FileMusic size={18} />
-            <span>Melody Slide</span>
-            {page === "melody" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
+          {/* ── School group (Mathematic) ── */}
+          <div>
+            <div className="flex items-center gap-2 px-2 pb-1.5">
+              <School size={13} className="text-slate-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                School
+              </span>
+            </div>
+            <div className="space-y-1">
+              {SCHOOL_NAV.map(({ id, label, icon: Icon }) => {
+                const active = page === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => goPage(id)}
+                    className={`w-full flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all
+                      ${
+                        active
+                          ? "bg-brand-50 text-brand-600 border border-brand-200"
+                          : "text-slate-600 border border-transparent hover:bg-slate-50"
+                      }`}
+                  >
+                    <Icon size={17} className={active ? "text-brand-500" : "text-slate-400"} />
+                    <span className="truncate">{label}</span>
+                    {active && <ChevronRight size={15} className="ml-auto text-brand-500" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-          <button
-            onClick={() => {
-              setPage("song");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "song"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <Music size={18} />
-            <span>Song Slides</span>
-            {page === "song" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
-
-          <button
-            onClick={() => {
-              setPage("extract");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "extract"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <ScanText size={18} />
-            <span>Song File Extract</span>
-            {page === "extract" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
-
-          <button
-            onClick={() => {
-              setPage("editor");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "editor"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <SlidersHorizontal size={18} />
-            <span>Slide Editor</span>
-            {page === "editor" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
-
-          <button
-            onClick={() => {
-              setPage("merge");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "merge"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <Merge size={18} />
-            <span>Merge Slides</span>
-            {page === "merge" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
-
-          <button
-            onClick={() => {
-              setPage("math");
-              setSidebarOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all
-              ${
-                page === "math"
-                  ? "bg-brand-50 text-brand-600 border border-brand-200"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-          >
-            <Calculator size={18} />
-            <span>Mathematic</span>
-            {page === "math" && <ChevronRight size={16} className="ml-auto" />}
-          </button>
+          {/* ── Books: grade + subject textbooks ── */}
+          <div>
+            <div className="flex items-center gap-2 px-2 pb-1.5">
+              <Library size={13} className="text-slate-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Books
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigate({ page: "books" });
+                setSidebarOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all
+                ${
+                  page === "books"
+                    ? "bg-brand-50 text-brand-600 border border-brand-200"
+                    : "text-slate-600 border border-transparent hover:bg-slate-50"
+                }`}
+            >
+              <Library size={17} className={page === "books" ? "text-brand-500" : "text-slate-400"} />
+              <div className="text-left min-w-0">
+                <span className="block truncate">Textbook Library</span>
+                <span className="block text-[10px] font-medium text-slate-400 truncate">
+                  Grade 4–6 · Khmer, Math, English
+                </span>
+              </div>
+              {page === "books" && (
+                <ChevronRight size={15} className="ml-auto text-brand-500 flex-shrink-0" />
+              )}
+            </button>
+          </div>
         </nav>
 
         {/* Footer info */}
         <div className="p-4 border-t border-slate-100 bg-slate-50/50">
-          <p className="text-[11px] font-medium text-slate-400">
-            ChurchTool — Worship Presentation Suite
+          <p className="text-[11px] font-semibold text-slate-500">SYASKYTOOL</p>
+          <p className="text-[10px] font-medium text-slate-400">
+            Worship presentation &amp; teaching suite
           </p>
         </div>
       </aside>
@@ -376,39 +447,31 @@ export default function App() {
             >
               <Menu size={20} />
             </button>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs">
-                {page === "bible" ? (
-                  <BookOpen size={16} className="text-white" />
-                ) : page === "melody" ? (
-                  <FileMusic size={16} className="text-white" />
-                ) : page === "song" ? (
-                  <Music size={16} className="text-white" />
-                ) : page === "extract" ? (
-                  <ScanText size={16} className="text-white" />
-                ) : page === "editor" ? (
-                  <SlidersHorizontal size={16} className="text-white" />
-                ) : page === "math" ? (
-                  <Calculator size={16} className="text-white" />
-                ) : (
-                  <Merge size={16} className="text-white" />
-                )}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-xs flex-shrink-0">
+                {(() => {
+                  const Icon = pageOf(page).icon;
+                  return <Icon size={16} className="text-white" />;
+                })()}
               </div>
-              <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
-                {page === "bible"
-                  ? "Bible Slides"
-                  : page === "melody"
-                    ? "Melody Slide"
-                    : page === "song"
-                      ? "Song Slides"
-                      : page === "extract"
-                        ? "Song File Extract"
-                        : page === "editor"
-                          ? "Slide Editor"
-                          : page === "math"
-                            ? "Mathematic"
-                            : "Merge Slides"}
-              </h1>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 leading-none hidden sm:block">
+                  {CHURCH_PAGES.includes(page)
+                    ? "SYASKYTOOL · Church"
+                    : page === "books"
+                      ? "SYASKYTOOL · Books"
+                      : "SYASKYTOOL · School"}
+                </p>
+                <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight truncate leading-tight">
+                  {pageOf(page).title}
+                </h1>
+              </div>
+              {MAINTAINING_PAGES.includes(page) && (
+                <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold uppercase tracking-wide">
+                  <Clock size={10} />
+                  Maintenance
+                </span>
+              )}
             </div>
             {page === "bible" && detected && (
               <span className="hidden md:inline-flex text-xs text-slate-500 ml-2">
@@ -451,13 +514,24 @@ export default function App() {
           </div>
         </header>
 
-        {/* Page Content */}
-        {page === "math" ? (
-          <MathematicPage />
+        {/* Page Content — keyed by page so it re-animates on every navigation click */}
+        <div key={page} className="page-enter flex-1 flex flex-col min-h-0 overflow-y-auto">
+        {page === "books" ? (
+          <BooksLibrary
+            selection={nav.books}
+            onSelect={(books) => navigate({ page: "books", books })}
+          />
+        ) : page === "math" ? (
+          <MathematicPage
+            tab={nav.mathTab}
+            onTabChange={(mathTab) => navigate({ mathTab })}
+          />
         ) : page === "melody" ? (
           <MelodySlidePage />
         ) : page === "song" ? (
           <SongSlidePage />
+        ) : page === "cover" ? (
+          <BookCoverPage />
         ) : page === "extract" ? (
           <SongExtractPage />
         ) : page === "editor" ? (
@@ -595,6 +669,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Popup Iframe Modal for copying Bible Verse */}
